@@ -47,9 +47,15 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Bindings',
       items: [
-        'bindings/python/index',
-        'bindings/python/server',
-        'bindings/python/client',
+        {
+          type: 'category',
+          label: 'Python',
+          link: { type: 'doc', id: 'bindings/python/index' },
+          items: [
+            'bindings/python/server',
+            'bindings/python/client',
+          ],
+        },
         'bindings/rust/index',
         'bindings/jvm/index',
         'bindings/dotnet/index',

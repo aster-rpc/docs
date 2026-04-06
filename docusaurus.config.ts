@@ -65,8 +65,8 @@ const config: Config = {
     image: 'img/aster-social-card.png',
     colorMode: {
       defaultMode: 'dark',
-      respectPrefersColorScheme: true,
-      disableSwitch: false,
+      respectPrefersColorScheme: false,
+      disableSwitch: true,
     },
     navbar: {
       title: 'Aster',
