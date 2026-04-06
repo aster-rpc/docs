@@ -1,0 +1,125 @@
+---
+id: trust-model
+title: Trust model
+slug: /concepts/trust-model
+---
+
+Aster includes a built-in trust model rooted in an offline ed25519 keypair. The model covers connection admission, credential verification, service-level authorization, and method-level capabilities -- without requiring external infrastructure like certificate authorities, OAuth providers, or API key management services.
+
+## Four-gate authorization
+
+Aster evaluates authorization through four sequential gates. Each gate runs at a different point in the connection and call lifecycle. A request must pass all applicable gates; no gate substitutes for another.
+
+### Gate 0: Connection-level admission
+
+When an incoming QUIC connection arrives, iroh's `EndpointHooks` inspect the handshake. The endpoint checks whether the remote `EndpointId` is already in the admitted set.
+
+- If the remote endpoint is already admitted, the connection proceeds.
+- If the remote endpoint is not admitted, only admission ALPNs (`aster.producer_admission`, `aster.consumer_admission`) are accepted. Non-admission ALPNs are rejected until the endpoint presents a valid credential.
+
+This gate prevents unauthenticated endpoints from reaching any service. The only thing an unknown endpoint can do is present a credential.
+
+### Gate 1: Credential admission
+
+The connecting endpoint presents an enrollment credential over the admission ALPN. The receiving node verifies:
+
+1. The credential's ed25519 signature is valid against the root public key.
+2. The credential has not expired.
+3. For producer credentials: the credential's `endpoint_id` matches the QUIC peer identity.
+4. For OTT (one-time token) consumer credentials: the nonce has not been consumed.
+5. Runtime checks pass (e.g., cloud Instance Identity Document verification, if required by credential attributes).
+
+On success, the endpoint is added to the admitted set and its credential attributes are stored for subsequent authorization decisions. The attributes are available to service handlers via `CallContext` without re-checking the signature.
+
+### Gate 2: Service-level authorization
+
+When a consumer opens a session with a service, the service's interceptors inspect the caller's identity and attributes. This gate is implemented by framework interceptors, not by the trust layer itself. Interceptors can enforce attribute-based access control, check custom policies, or delegate to application-specific authorization logic.
+
+### Gate 3: Method-level capabilities
+
+Individual methods can declare `CapabilityRequirement` entries that restrict which callers may invoke them:
+
+| Kind | Meaning |
+| --- | --- |
+| `ROLE` | Caller must have a specific `aster.role` attribute value |
+| `ANY_OF` | Caller must have at least one of the listed capabilities |
+| `ALL_OF` | Caller must have all of the listed capabilities |
+
+These requirements are declared in the service definition and checked by framework interceptors against the attributes in `CallContext`. The check is automatic -- service code does not need to implement it.
+
+## Root key
+
+All trust flows from a single ed25519 keypair called the root key.
+
+The private root key is **offline**. It is generated once, stored securely (hardware-backed where possible), and brought online only to sign enrollment credentials or perform catastrophic recovery. It never touches a running mesh node.
+
+The public root key is embedded in every credential and every node's configuration. It is the trust anchor -- nodes verify credential signatures against it.
+
+There is exactly one root key per deployment. All authorization decisions ultimately trace back to a credential signed by this key.
+
+## EnrollmentCredential (producer)
+
+An enrollment credential authorizes a specific endpoint to join the producer mesh. It is signed offline by the root key.
+
+```
+EnrollmentCredential {
+    endpoint_id   -- the endpoint being authorized (ed25519 public key)
+    root_pubkey   -- the root key's public key
+    expires_at    -- expiry time (epoch seconds)
+    attributes    -- key-value pairs (role, name, cloud identity claims)
+    signature     -- ed25519 signature covering all fields
+}
+```
+
+Key properties:
+- **Bound to a specific endpoint.** The credential's `endpoint_id` must match the QUIC peer identity during admission. A credential cannot be used by a different endpoint.
+- **Carries attributes.** The `attributes` map provides metadata that downstream authorization gates use. Reserved keys include `aster.role` (producer, gateway, consumer), `aster.name`, and cloud identity claims (`aster.iid_provider`, `aster.iid_account`, `aster.iid_region`).
+- **Time-limited.** The `expires_at` field bounds the blast radius of a compromised key. Expired credentials are rejected.
+
+## ConsumerEnrollmentCredential
+
+Consumer credentials come in two variants, both signed by the same root key:
+
+**Policy credentials** are not bound to a specific endpoint. They carry attribute-based policies (e.g., "any endpoint running in AWS account X in region Y"). Any endpoint whose Instance Identity Document satisfies the policy can present this credential and be admitted. Multiple endpoints can use the same policy credential simultaneously. This is designed for auto-scaling consumer fleets where individual endpoint IDs are ephemeral.
+
+**OTT (one-time token) credentials** carry a 32-byte random nonce. The credential can be used exactly once -- after the nonce is consumed during admission, the credential is invalid. OTTs are suitable for controlled, one-time grants or ephemeral consumers where endpoint IDs are known in advance.
+
+## Producer mesh
+
+Producers coordinate via iroh-gossip. The gossip topic is derived deterministically from the root public key and a secret random salt:
+
+```
+TopicId = blake3(root_public_key || "aster-producer-mesh" || salt)
+```
+
+The salt is generated by the founding node at startup and is only shared with endpoints after they pass all admission checks. An endpoint that holds a valid enrollment credential but has not been admitted cannot derive the topic ID and cannot subscribe to mesh gossip.
+
+The founding node (first node in the mesh) generates the salt, starts listening, and prints its endpoint ticket. Subsequent nodes bootstrap by dialing the founding node, presenting their credential, and receiving the salt and current membership list on successful admission.
+
+## Deauthorization
+
+Deauthorization in Aster is intentionally epochal, not incremental.
+
+There is no signed "revoke this endpoint" message that cryptographically forces other nodes to evict a peer. A graceful departure message exists but is voluntary -- a compromised node will not send one.
+
+The hard deauthorization mechanism is **salt rotation**. The operator generates a new salt and distributes it out of band to trusted nodes. Those nodes derive a new gossip topic and migrate to it. The excluded node, lacking the new salt, cannot follow. It is left on the old topic, unable to discover the new mesh.
+
+This is coarse-grained by design. It forces the entire mesh to rotate rather than surgically removing one node. The trade-off is simplicity: no revocation lists, no epoch counters, no incremental signed-revoke protocol. Salt rotation is the single mechanism, and it is definitive.
+
+## Development mode
+
+For rapid development and testing, Aster supports a development mode where:
+
+- Endpoints generate ephemeral keys (no persistent identity).
+- All gates are open (no enrollment credentials required).
+- Auto-admission allows any endpoint to connect without presenting credentials.
+
+Development mode is a convenience for local development. It must not be used in production -- there is no security boundary when all gates are bypassed.
+
+## Scope of the trust model
+
+Gates 0 and 1 apply only to remote (network) calls. They are connection-level constructs that operate on QUIC handshakes and admission streams. In-process calls via local transport bypass these gates entirely: the caller is trusted by construction.
+
+Gate 2 and Gate 3 interceptors run on all calls. Interceptors that check `CallContext` must handle the case where `peer` is `None` and `attributes` is empty (the in-process case). The canonical behavior is to trust the in-process caller.
+
+Network-level controls (source IP filtering, CIDR allowlists) are out of scope. iroh's connection model -- relay-mediated paths, hole-punching, multi-homing -- makes source IP an unreliable signal. Operators who need network-level filtering should enforce it at the network boundary (VPN, firewall, network policy), not in the framework.

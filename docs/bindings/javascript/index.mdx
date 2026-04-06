@@ -1,0 +1,80 @@
+---
+id: index
+title: JavaScript
+slug: /bindings/javascript
+---
+
+import BindingBadge from '@site/src/components/BindingBadge';
+
+<BindingBadge label="JavaScript binding" tone="planned" />
+
+## Status
+
+Planned. Development will begin after the Python binding stabilizes.
+
+## Timeline
+
+The JavaScript binding is expected to follow the core systems-language bindings (Rust, JVM, .NET, Go) in priority.
+
+## Architecture
+
+Two approaches are under consideration:
+
+### Option A: WASM
+
+Compile the `core` crate to WebAssembly for use in browsers and edge runtimes (Deno, Cloudflare Workers).
+
+```
+JavaScript / TypeScript application code
+        |
+        v
+@aster/client npm package     Idiomatic JS API: decorators (TC39),
+                              AsyncIterator for streaming, AbortSignal for cancellation
+        |
+        | wasm-bindgen
+        v
+core.wasm                     Core crate compiled to WASM
+        |
+        v
+iroh crates (WASM-compatible subset)
+```
+
+WASM provides the broadest reach (browsers, edge, Node.js) but may have limitations around direct UDP access. Browser-based consumers would connect via WebSocket-to-QUIC relay bridges.
+
+### Option B: N-API (Node.js native addon)
+
+Use N-API to expose the `core` crate as a native Node.js addon, similar to the Python PyO3 approach.
+
+```
+JavaScript / TypeScript application code (Node.js)
+        |
+        v
+@aster/client npm package     Idiomatic JS API
+        |
+        | N-API
+        v
+aster.node                    Native addon built from core crate
+        |
+        v
+iroh crates (full functionality)
+```
+
+N-API provides full access to the networking stack (including direct UDP) but is limited to Node.js and compatible runtimes.
+
+### Key design decisions
+
+- **TypeScript-first** with full type definitions.
+- **TC39 decorators** (Stage 3) for service definitions where available; plain class registration as a fallback.
+- **AsyncIterator** for streaming patterns.
+- **AbortSignal** for cancellation and deadline propagation.
+- **Apache Fory JavaScript** will handle XLANG serialization for wire compatibility.
+
+### Requirements
+
+- Node.js 18+ (for N-API) or any modern browser/edge runtime (for WASM).
+- The native addon or WASM module for the target platform.
+
+## Further reading
+
+- [FFI Plan](/ffi_spec/FFI_PLAN.md) for the C FFI layer design
+- [Cross-Language Interop](/examples/cross-language) for how wire types enable multi-language deployments

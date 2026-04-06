@@ -1,0 +1,132 @@
+---
+id: discovery
+title: Discovery and registry
+slug: /concepts/discovery
+---
+
+Aster includes a decentralised service registry built on iroh's data primitives. There is no central server, no Consul, no etcd. Registry state replicates across participants using the same peer-to-peer infrastructure that carries RPC traffic.
+
+## Three iroh primitives
+
+The registry is built on three independent iroh subsystems, each suited to a different data pattern:
+
+**iroh-docs** -- replicated key-value store for mutable state. iroh-docs provides a CRDT-based document model where multiple authors can write entries concurrently. Entries are signed by their author's keypair, providing cryptographic proof of authorship. The registry uses iroh-docs for endpoint leases, service aliases, channel pointers, access control lists, and configuration.
+
+**iroh-blobs** -- content-addressed storage for immutable artifacts. iroh-blobs stores data identified by its BLAKE3 hash. Data is transferred directly between peers, verified on receipt, and cacheable indefinitely (the hash guarantees integrity). The registry uses iroh-blobs for contract bundles -- the immutable collections containing canonical service definitions and type definitions.
+
+**iroh-gossip** -- pub-sub for real-time notifications. iroh-gossip provides topic-based message broadcast across the mesh. The registry uses gossip for real-time events: `CONTRACT_PUBLISHED` when a new contract is available, `LeaseUpdate` when an endpoint comes online or goes offline, and other operational notifications.
+
+## Registry namespace structure
+
+The registry organizes data in an iroh-docs namespace with the following key structure:
+
+```
+{namespace}/
+  _aster/
+    acl/
+      writers              -- list of authorized AuthorIds
+      readers              -- list of authorized AuthorIds
+      admins               -- list of authorized AuthorIds
+      policy               -- registry policy configuration
+    config/
+      gossip_topic         -- TopicId for change notifications
+      lease_duration_s     -- default: 45 seconds
+      lease_refresh_interval_s -- default: 15 seconds
+
+  contracts/
+    {contract_id}          -- ArtifactRef (pointer to blob collection)
+
+  services/
+    {service_name}/
+      versions/
+        v{version}         -- contract_id
+      channels/
+        stable             -- contract_id
+        canary             -- contract_id
+        dev                -- contract_id
+      tags/
+        {label}            -- contract_id
+      meta                 -- service metadata
+      contracts/
+        {contract_id}/
+          endpoints/
+            {endpoint_id}  -- EndpointLease
+
+  endpoints/
+    {endpoint_id}/
+      meta                 -- optional static endpoint metadata
+      tags                 -- optional discovery tags
+
+  compatibility/
+    {contract_id}/
+      {other_contract_id}  -- compatibility report
+```
+
+All entries are signed by their author's keypair. The `AuthorId` on each entry provides cryptographic proof of who wrote it.
+
+## ArtifactRef: linking docs to blobs
+
+The registry separates mutable pointers (in iroh-docs) from immutable data (in iroh-blobs). The link between them is an `ArtifactRef` -- a small JSON document stored as a docs entry that points to an iroh blob collection:
+
+```
+ArtifactRef {
+    contract_id          -- BLAKE3 hash of the ServiceContract
+    collection_hash      -- BLAKE3 root hash of the iroh blob collection
+    provider_endpoint_id -- optional: endpoint serving the blobs
+    relay_url            -- optional: relay for the provider
+    ticket               -- optional: bearer blob ticket for direct fetch
+    published_by         -- AuthorId of the publisher
+    published_at_epoch_ms -- publication timestamp
+}
+```
+
+This indirection keeps the docs layer lightweight. Docs entries are small pointers; the actual contract artifacts (which may include type definitions, documentation, and compatibility reports) are stored as content-addressed blobs and transferred efficiently via iroh-blobs.
+
+## Endpoint leases
+
+An endpoint that serves a particular contract advertises itself by writing an `EndpointLease` to the registry. Leases are time-bounded: they have a duration (default 45 seconds) and must be refreshed periodically (default every 15 seconds).
+
+If an endpoint stops refreshing its lease -- because it crashed, lost connectivity, or shut down -- the lease expires and consumers stop routing to it. There is no heartbeat protocol; the lease mechanism in iroh-docs is the health signal.
+
+Leases carry the endpoint's `NodeAddr` (public key, relay URL, direct addresses), so consumers have everything they need to establish a connection without additional discovery steps.
+
+## Service resolution
+
+The flow from "I need this service" to "I have a connection" is:
+
+1. The consumer knows a `contract_id` (from its compiled client stub or configuration).
+2. The consumer looks up `contracts/{contract_id}` in the registry docs namespace.
+3. The entry contains an `ArtifactRef` with a `collection_hash`.
+4. The consumer fetches the blob collection (if not already cached) and verifies `blake3(contract.xlang) == contract_id`.
+5. The consumer looks up `services/{name}/contracts/{contract_id}/endpoints/` for active leases.
+6. The consumer selects an endpoint and dials it using the `NodeAddr` from the lease.
+
+All of this happens over the same iroh infrastructure. The registry lookup uses iroh-docs sync, the artifact fetch uses iroh-blobs transfer, and the RPC call uses iroh QUIC. No separate discovery infrastructure is needed.
+
+## Channels and versions
+
+Services can organize their contracts into channels and versions:
+
+- **Versions** (`v1`, `v2`, ...) map to specific `contract_id` values. A version is immutable once published.
+- **Channels** (`stable`, `canary`, `dev`) are mutable pointers to a `contract_id`. Promoting a canary to stable is a single docs write that updates the `stable` channel pointer.
+- **Tags** are arbitrary labels that point to a `contract_id`, useful for custom workflows.
+
+This model supports gradual rollout, blue-green deployment, and experimentation without any infrastructure beyond the registry itself.
+
+## Gossip notifications
+
+Changes to the registry are broadcast via iroh-gossip so that participants learn about new contracts, endpoint changes, and configuration updates in real time rather than polling.
+
+Key gossip events:
+
+- **CONTRACT_PUBLISHED** -- a new contract has been published; consumers can fetch it.
+- **LeaseUpdate** -- an endpoint has come online, gone offline, or updated its metadata.
+- **ChannelUpdate** -- a channel pointer has changed (e.g., a new version promoted to stable).
+
+Gossip is a hint mechanism, not a source of truth. If a gossip message is missed, the consumer will still see the change the next time it syncs the docs namespace. Gossip accelerates propagation; docs provides durability.
+
+## No central server
+
+The registry has no central server, no leader election, and no single point of failure. Every participant holds a replica of the docs namespace and syncs with peers. Writes are concurrent and conflict-free (iroh-docs uses CRDTs). Blob collections are immutable and content-addressed, so any peer that has the data can serve it.
+
+This means the registry works in the same environments as Aster itself: behind NATs, across organizational boundaries, without centralized infrastructure. The registry is part of the mesh, not a dependency external to it.

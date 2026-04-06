@@ -1,0 +1,172 @@
+---
+id: index
+title: Python
+slug: /bindings/python
+---
+
+import BindingBadge from '@site/src/components/BindingBadge';
+
+<BindingBadge label="Python binding" tone="stable" />
+
+Python is the reference implementation for Aster. It provides the full RPC framework, trust model, and iroh networking stack as an async Python library.
+
+## Status
+
+Production-ready for 0.1-alpha. The Python binding is the first-class implementation and defines the reference behavior for cross-language interop. All features documented on this site are available in Python.
+
+## Installation
+
+```bash
+pip install aster-python
+```
+
+**Requirements:** Python 3.9+, macOS / Linux / Windows.
+
+The package includes a native extension (compiled Rust via PyO3), so wheels are provided for common platforms. Building from source requires a Rust toolchain and maturin.
+
+## Quick example
+
+```python
+import asyncio
+from dataclasses import dataclass
+from aster import AsterServer, AsterClient
+from aster.decorators import service, rpc
+
+@dataclass
+class HelloRequest:
+    name: str = ""
+
+@dataclass
+class HelloResponse:
+    message: str = ""
+
+@service
+class HelloService:
+    @rpc
+    async def say_hello(self, req: HelloRequest) -> HelloResponse:
+        return HelloResponse(message=f"Hello, {req.name}!")
+
+async def main():
+    # Producer
+    async with AsterServer(services=[HelloService()]) as srv:
+        addr = srv.endpoint_addr_b64
+
+        # Consumer
+        async with AsterClient(endpoint_addr=addr) as client:
+            hello = await client.client(HelloService)
+            resp = await hello.say_hello(HelloRequest(name="World"))
+            print(resp.message)  # "Hello, World!"
+
+asyncio.run(main())
+```
+
+## API surface
+
+### Decorators
+
+Define services and methods with decorators on plain Python classes:
+
+| Decorator | Purpose |
+|-----------|---------|
+| `@service` | Mark a class as an Aster RPC service. |
+| `@rpc` | Unary RPC method. |
+| `@server_stream` | Server-streaming method (async generator). |
+| `@client_stream` | Client-streaming method. |
+| `@bidi_stream` | Bidirectional streaming method. |
+| `@wire_type("ns/Type")` | Stable wire identity for a dataclass. |
+
+### Server
+
+| API | Purpose |
+|-----|---------|
+| `AsterServer(services=[...])` | High-level declarative producer. Handles admission, hooks, and ALPN routing. |
+| `Server(endpoint, services=[...])` | Lower-level server. Manual endpoint and connection management. |
+
+### Client
+
+| API | Purpose |
+|-----|---------|
+| `AsterClient(endpoint_addr=...)` | High-level declarative consumer. Handles admission and service discovery. |
+| `create_client(ServiceClass, connection=conn)` | Lower-level client. Wraps an existing QUIC connection. |
+| `create_local_client(ServiceClass, server)` | In-process client using `LocalTransport` (for testing). |
+| `create_session(ServiceClass, connection=conn)` | Session-scoped client with per-connection state. |
+
+### Configuration
+
+| API | Purpose |
+|-----|---------|
+| `AsterConfig` | Unified configuration dataclass. Loads from env vars, TOML files, or code. |
+| `AsterConfig.from_env()` | Build config from `ASTER_*` environment variables. |
+| `AsterConfig.from_file("aster.toml")` | Build config from TOML file with env overrides. |
+| `config.print_config()` | Display resolved config with provenance. |
+
+### Trust
+
+| API | Purpose |
+|-----|---------|
+| `generate_root_keypair()` | Generate an ed25519 root keypair (offline use). |
+| `sign_credential(...)` | Sign an enrollment credential with the root private key. |
+| `ConsumerEnrollmentCredential` | Dataclass representing a signed enrollment token. |
+
+### Interceptors
+
+Built-in middleware chain:
+
+| Interceptor | Purpose |
+|-------------|---------|
+| `DeadlineInterceptor` | Enforce and propagate call deadlines. |
+| `AuthInterceptor` | Token-based authentication. |
+| `RetryInterceptor` | Automatic retry for idempotent methods. |
+| `CircuitBreakerInterceptor` | Circuit breaker pattern for failing endpoints. |
+| `AuditLogInterceptor` | Log all RPC calls for audit. |
+| `MetricsInterceptor` | Collect call latency and error metrics. |
+| `CapabilityInterceptor` | Enforce `requires` capability checks. |
+
+### Sessions
+
+| API | Purpose |
+|-----|---------|
+| `@service(scoped="stream")` | Per-connection service instances. |
+| `create_session(ServiceClass, connection=conn)` | Open a session-scoped stream from the client. |
+
+## Architecture
+
+The Python binding is structured as a four-layer stack:
+
+```
+Python (aster package)        Pure Python: decorators, server, client,
+                              codec, interceptors, trust, sessions
+        |
+        | PyO3
+        v
+Rust bindings (PyO3)          Thin wrappers exposing async methods
+                              as Python awaitables
+        |
+        v
+core crate (Rust)             Authoritative backend: all transport
+                              logic, QUIC endpoint management
+        |
+        v
+iroh crates                   iroh, iroh-blobs, iroh-docs, iroh-gossip
+```
+
+The PyO3 module starts a single shared Tokio runtime. All async Rust functions are bridged to Python awaitables via `pyo3-async-runtimes`. The Python layer uses `asyncio` for all async operations.
+
+## Testing
+
+Tests use `pytest` with `pytest-asyncio` (auto mode):
+
+```bash
+pip install pytest pytest-asyncio pytest-timeout
+pytest tests/python/ -v --timeout=30
+```
+
+The `conftest.py` provides fixtures for common setups: `node`, `node_pair`, `endpoint_pair`.
+
+## Further reading
+
+- [Hello Service](/examples/hello-service) -- complete walkthrough of the simplest service
+- [Define a Service](/guides/define-a-service) -- decorators, wire types, streaming, sessions
+- [Dial a Service](/guides/dial-a-service) -- connecting, admission, error handling
+- [Configuration](/reference/configuration) -- full AsterConfig reference
+- [CLI Reference](/reference/cli) -- command-line tools

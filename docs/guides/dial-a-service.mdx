@@ -1,0 +1,225 @@
+---
+id: dial-a-service
+title: Dial a Service
+slug: /guides/dial-a-service
+---
+
+This guide covers how to connect to an Aster producer and call RPC methods from a consumer. All examples are Python-specific; the underlying concepts (endpoint addressing, admission, typed stubs) apply across language bindings.
+
+## AsterClient: the simplest way to connect
+
+`AsterClient` is the high-level consumer API. It handles endpoint creation, admission, and connection management:
+
+```python
+import asyncio
+from aster import AsterClient
+
+async def main():
+    async with AsterClient(endpoint_addr="<base64 NodeAddr>") as client:
+        hello = await client.client(HelloService)
+        resp = await hello.say_hello(HelloRequest(name="World"))
+        print(resp.message)
+
+asyncio.run(main())
+```
+
+`AsterClient` is an async context manager. On entry it creates a QUIC endpoint, runs the admission handshake, and discovers available services. On exit it closes all connections.
+
+## Configuration
+
+### Required: endpoint address
+
+The consumer needs the producer's endpoint address. This is a base64-encoded `NodeAddr` printed by `AsterServer` on startup:
+
+```python
+# Inline
+client = AsterClient(endpoint_addr="aGVsbG8gd29ybGQ...")
+
+# Or via environment variable
+# export ASTER_ENDPOINT_ADDR=aGVsbG8gd29ybGQ...
+client = AsterClient()  # reads from env automatically
+```
+
+### Optional: trust settings
+
+In production, the consumer presents an enrollment credential to prove authorization:
+
+```python
+client = AsterClient(
+    endpoint_addr="...",
+    root_pubkey=root_pub_bytes,
+    enrollment_credential_file="consumer.token",
+)
+```
+
+Or equivalently, via environment variables:
+
+```bash
+export ASTER_ENDPOINT_ADDR=aGVsbG8gd29ybGQ...
+export ASTER_ROOT_PUBKEY=<hex-encoded 32-byte key>
+export ASTER_ENROLLMENT_CREDENTIAL=consumer.token
+```
+
+## Admission flow
+
+When `AsterClient.connect()` runs (or `__aenter__` fires), the client:
+
+1. Creates a local QUIC endpoint.
+2. Opens a connection to the producer on the `aster.consumer_admission` ALPN.
+3. Sends the enrollment credential (if configured) for verification.
+4. Receives an admission decision and the list of available services.
+5. Stores the service list for subsequent `client()` calls.
+
+In dev mode (producer started without explicit credentials), the consumer gate is open and no credential is needed. The admission handshake still runs to discover the service list.
+
+## Getting a typed client stub
+
+After connecting, call `client.client(ServiceClass)` to get a typed stub:
+
+```python
+hello = await client.client(HelloService)
+```
+
+This looks up the service by name and version from the admission response, opens an `aster/1` QUIC connection to the service's channel, and returns a `ServiceClient` bound to that service.
+
+The service class must be `@service`-decorated. The consumer needs access to the same class definition (or a compatible one with matching wire types) as the producer.
+
+## Making calls
+
+### Unary
+
+```python
+resp = await hello.say_hello(HelloRequest(name="World"))
+```
+
+### Server streaming
+
+```python
+async for update in await tasks.watch_tasks(WatchRequest(filter="active")):
+    print(update.task_id, update.status)
+```
+
+### Client streaming
+
+```python
+async def generate_records():
+    for i in range(100):
+        yield Record(key=f"k{i}", value=float(i))
+
+result = await analytics.ingest(generate_records())
+print(result.count)
+```
+
+### Bidirectional streaming
+
+```python
+async def commands():
+    yield Command(action="list")
+    yield Command(action="status")
+
+async for result in await shell.execute(commands()):
+    print(result.output)
+```
+
+## Session-scoped services
+
+Session-scoped services maintain per-connection state. The consumer creates a session using `create_session`:
+
+```python
+from aster.session import create_session
+
+session = await create_session(ChatRoomService, connection=conn)
+
+# All calls on this session share the same server-side instance
+await session.set_nickname(SetNicknameRequest(nickname="Alice"))
+resp = await session.send_message(SendMessageRequest(text="Hello"))
+
+# Stream history from the session
+async for item in await session.get_history(HistoryRequest()):
+    print(f"[{item.nickname}] {item.text}")
+
+await session.close()
+```
+
+## Error handling
+
+Aster uses status codes compatible with gRPC (codes 0--16). Errors are raised as `RpcError`:
+
+```python
+from aster import RpcError, StatusCode
+
+try:
+    resp = await hello.say_hello(HelloRequest(name=""))
+except RpcError as e:
+    print(f"RPC failed: {e.code.name} - {e.message}")
+    if e.code == StatusCode.NOT_FOUND:
+        print("Service or method not found")
+    elif e.code == StatusCode.PERMISSION_DENIED:
+        print("Not authorized")
+    elif e.code == StatusCode.DEADLINE_EXCEEDED:
+        print("Call timed out")
+```
+
+`RpcError` has three attributes: `code` (a `StatusCode` enum), `message` (human-readable string), and `details` (a `dict[str, str]` with extra context).
+
+## Connection lifecycle
+
+### Explicit lifecycle
+
+```python
+client = AsterClient(endpoint_addr="...")
+await client.connect()
+
+hello = await client.client(HelloService)
+resp = await hello.say_hello(HelloRequest(name="World"))
+
+await client.close()
+```
+
+### Context manager (recommended)
+
+```python
+async with AsterClient(endpoint_addr="...") as client:
+    hello = await client.client(HelloService)
+    resp = await hello.say_hello(HelloRequest(name="World"))
+# close() called automatically
+```
+
+Calling `close()` multiple times is safe (idempotent). It closes all RPC connections and the underlying QUIC endpoint.
+
+## Dev mode vs production mode
+
+### Dev mode
+
+No credentials needed. The producer auto-generates an ephemeral root key and opens the consumer gate:
+
+```bash
+# Terminal 1 -- producer
+python producer.py
+
+# Terminal 2 -- consumer (just needs the address)
+export ASTER_ENDPOINT_ADDR=<printed by producer>
+python consumer.py
+```
+
+### Production mode
+
+The operator generates a root keypair offline, distributes the public key to producers, and signs enrollment credentials for consumers:
+
+```bash
+# Operator (offline machine)
+aster trust keygen root --out root.key
+aster trust keygen pubkey --in root.key --out root_pub.key
+aster trust sign consumer --root-key root.key --type policy --out consumer.token
+
+# Producer
+export ASTER_ROOT_PUBKEY_FILE=root_pub.key
+python producer.py
+
+# Consumer
+export ASTER_ENDPOINT_ADDR=<producer addr>
+export ASTER_ENROLLMENT_CREDENTIAL=consumer.token
+python consumer.py
+```
+
+In production mode, unenrolled consumers are rejected at the admission gate. See [Configuration](/reference/configuration) for the full set of trust-related settings.

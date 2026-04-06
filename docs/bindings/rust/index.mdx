@@ -1,0 +1,52 @@
+---
+id: index
+title: Rust
+slug: /bindings/rust
+---
+
+import BindingBadge from '@site/src/components/BindingBadge';
+
+<BindingBadge label="Rust binding" tone="planned" />
+
+## Status
+
+Planned. Development will begin after the Python binding stabilizes.
+
+## Timeline
+
+The Rust binding is the next binding after Python. It will provide idiomatic Rust access to the Aster RPC framework with compile-time type safety and zero-cost abstractions.
+
+## Architecture
+
+The Rust binding has a significant structural advantage: the `core` crate that powers the Python binding is already written in Rust. The Rust binding will expose this crate directly as a public API, with no FFI overhead.
+
+```
+Rust application code
+        |
+        v
+aster crate (public API)      Idiomatic Rust types, async traits,
+                              derive macros for @service equivalent
+        |
+        v
+core crate                    The same backend used by the Python binding.
+                              All transport logic, QUIC management.
+        |
+        v
+iroh crates                   iroh, iroh-blobs, iroh-docs, iroh-gossip
+```
+
+### Key design decisions
+
+- **Derive macros** will replace Python's `@service` / `@rpc` / `@wire_type` decorators. Service definitions will use `#[derive(AsterService)]` and `#[aster::rpc]` attributes.
+- **Fory Rust** (Apache Fory's Rust implementation) will handle XLANG serialization, ensuring wire compatibility with Python and other bindings.
+- **No runtime overhead.** Since the core crate is Rust, there is no FFI boundary to cross. The Rust binding is the core crate with an ergonomic public API layer.
+- **Async-first.** The API will be async using Tokio, matching the existing core crate's runtime model.
+
+### Wire compatibility
+
+The Rust binding will produce identical `contract_id` values and wire output as the Python binding for the same service definitions. This is verified by shared test vectors.
+
+## Further reading
+
+- [FFI Plan](/ffi_spec/FFI_PLAN.md) for the full cross-language architecture
+- [Cross-Language Interop](/examples/cross-language) for how wire types enable multi-language deployments

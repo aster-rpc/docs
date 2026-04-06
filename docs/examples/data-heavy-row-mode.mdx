@@ -1,0 +1,172 @@
+---
+id: data-heavy-row-mode
+title: Data-Heavy Row Mode
+slug: /examples/data-heavy-row-mode
+---
+
+Aster's ROW serialization mode provides a row-oriented binary format with zero-copy random-access field reads. It is designed for data-heavy workloads where the consumer may only need a subset of fields from large records, or where the schema is sent once and many rows follow. This example is Python-specific.
+
+## When to use ROW mode
+
+ROW mode is appropriate when:
+
+- Records are large (many fields, large string/bytes values) and the consumer reads only a few fields per record.
+- You are streaming large result sets where the schema is stable across all rows.
+- Your workload resembles an analytics query or data pipeline more than a traditional RPC call.
+
+For typical request/response RPC, the default `XLANG` mode is simpler and sufficient. Use `NATIVE` mode when you need maximum single-language performance. Use `ROW` mode when field-level random access matters.
+
+## Setting ROW mode
+
+ROW mode can be set at the service level or per-method:
+
+```python
+from aster.types import SerializationMode
+from aster.decorators import service, rpc, server_stream
+
+@service(serialization=SerializationMode.ROW)
+class DataPipelineService:
+    """All methods in this service use ROW mode."""
+
+    @rpc
+    async def query(self, req: QueryRequest) -> QueryResult:
+        ...
+```
+
+Or override on a single method:
+
+```python
+@service
+class AnalyticsService:
+
+    @rpc(serialization=SerializationMode.ROW)
+    async def heavy_query(self, req: QueryRequest) -> QueryResult:
+        ...
+
+    @rpc  # Uses the service default (XLANG)
+    async def lightweight_status(self, req: StatusRequest) -> StatusResponse:
+        ...
+```
+
+## Example: data processing service
+
+```python
+from dataclasses import dataclass
+from typing import AsyncIterator
+
+from aster.codec import wire_type
+from aster.decorators import service, rpc, server_stream
+from aster.types import SerializationMode
+
+@wire_type("analytics/QueryRequest")
+@dataclass
+class QueryRequest:
+    table: str = ""
+    filter_expr: str = ""
+    limit: int = 100
+
+@wire_type("analytics/DataRow")
+@dataclass
+class DataRow:
+    row_id: int = 0
+    timestamp: int = 0
+    metric_name: str = ""
+    value: float = 0.0
+    tags: str = ""         # JSON-encoded for simplicity
+    raw_payload: bytes = b""  # Large binary data
+
+@wire_type("analytics/AggResult")
+@dataclass
+class AggResult:
+    count: int = 0
+    sum_value: float = 0.0
+    avg_value: float = 0.0
+    min_value: float = 0.0
+    max_value: float = 0.0
+
+@service("Analytics", version=1)
+class AnalyticsService:
+
+    @server_stream(serialization=SerializationMode.ROW)
+    async def scan(self, req: QueryRequest) -> AsyncIterator[DataRow]:
+        """Stream rows matching the filter. ROW mode sends the schema once,
+        then each row as a compact binary record."""
+        for i in range(req.limit):
+            yield DataRow(
+                row_id=i,
+                timestamp=1700000000 + i,
+                metric_name="cpu.usage",
+                value=42.0 + i * 0.1,
+                tags='{"host": "node-1"}',
+                raw_payload=b"\x00" * 256,
+            )
+
+    @rpc(serialization=SerializationMode.ROW)
+    async def aggregate(self, req: QueryRequest) -> AggResult:
+        """Aggregate query. ROW mode allows the consumer to read individual
+        fields without deserializing the entire response."""
+        return AggResult(
+            count=1000,
+            sum_value=42000.0,
+            avg_value=42.0,
+            min_value=0.1,
+            max_value=99.9,
+        )
+```
+
+## Server streaming with ROW mode
+
+ROW mode is most useful with `@server_stream` when sending large result sets. The wire protocol optimizes for this case:
+
+1. **ROW_SCHEMA frame hoisting.** The first frame in the stream carries the Fory row schema (field names, types, offsets). Subsequent frames carry only the row data, referencing the schema by position.
+2. **Zero-copy field access.** The consumer can read individual fields from the binary row buffer without deserializing the entire record. This is implemented by Fory's row format at the codec level.
+3. **Compression.** Each frame is independently compressed with zstd when it exceeds the compression threshold (default: 4096 bytes). Large `raw_payload` fields benefit significantly.
+
+### Consumer side
+
+```python
+from aster import AsterClient
+
+async with AsterClient(endpoint_addr="...") as client:
+    analytics = await client.client(AnalyticsService)
+
+    async for row in await analytics.scan(QueryRequest(table="metrics", limit=500)):
+        # Full deserialization happens here, but the ROW format allows
+        # the codec to skip fields the consumer doesn't access
+        print(f"Row {row.row_id}: {row.metric_name} = {row.value}")
+```
+
+## Performance characteristics
+
+| Mode | Serialization cost | Deserialization cost | Random field access | Cross-language |
+|------|-------------------|---------------------|--------------------|----|
+| `XLANG` | Medium | Medium | No (full deser required) | Yes |
+| `NATIVE` | Low | Low | No | No (Python only) |
+| `ROW` | Medium-High (schema overhead) | Low (field-level) | Yes | Yes (where supported) |
+
+**When ROW wins:**
+- Streaming hundreds or thousands of rows with stable schema (schema is sent once).
+- Consumer reads 2--3 fields from a 20-field record.
+- Records contain large binary payloads that the consumer may skip entirely.
+
+**When ROW loses:**
+- Small records with few fields (schema overhead dominates).
+- Consumer always reads all fields (no random-access benefit).
+- Single unary calls (no schema amortization across rows).
+
+## Combining with other modes
+
+A service can offer methods in different serialization modes. The client and server negotiate the mode per-method based on the service's declared capabilities:
+
+```python
+@service(serialization=[SerializationMode.XLANG, SerializationMode.ROW])
+class HybridService:
+
+    @rpc  # Negotiates XLANG or ROW based on client preference
+    async def status(self, req: StatusRequest) -> StatusResponse:
+        ...
+
+    @server_stream(serialization=SerializationMode.ROW)  # Forces ROW
+    async def scan(self, req: ScanRequest) -> AsyncIterator[DataRow]:
+        ...
+```

@@ -40,3 +40,5 @@ out/
 
 # Git
 !.gitignore
+_private/
+

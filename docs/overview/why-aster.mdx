@@ -1,0 +1,93 @@
+---
+id: why-aster
+title: Why Aster?
+slug: /overview/why-aster
+---
+
+## The assumptions are breaking down
+
+gRPC, Thrift, and the broader cloud-native RPC ecosystem were built on a set of assumptions that made sense for data-center services behind load balancers:
+
+- Services have stable, routable addresses.
+- DNS resolves those addresses reliably.
+- TLS is terminated at the edge by infrastructure you control.
+- A service mesh handles mTLS, retries, and observability.
+- A central registry (Consul, etcd, Kubernetes) tracks what is running where.
+
+These assumptions break down in edge computing, IoT, multi-cloud, air-gapped environments, and peer-to-peer applications. When your services run behind consumer NATs, on mobile devices, in factory-floor PLCs, or across organizational boundaries, the infrastructure that cloud-native RPC depends on either does not exist or cannot be trusted.
+
+## Identity-first: connections go to WHO, not WHERE
+
+In Aster, every endpoint has an ed25519 keypair. The public key -- the `EndpointId` -- is the stable identity. It does not change when the endpoint moves networks, changes IP addresses, or roams between Wi-Fi and cellular.
+
+When you connect to a service, you specify the endpoint's public key. The transport layer resolves that identity to a network path using whatever information is available: direct addresses, relay servers, local network discovery. The application never sees an IP address.
+
+This eliminates an entire class of infrastructure: DNS records that map names to addresses, load balancers that terminate connections and re-originate them, service meshes that intercept traffic to inject identity. In Aster, identity is a property of the transport, not a layer bolted on top of it.
+
+## No infrastructure
+
+Aster requires no servers, no load balancers, no service mesh, no DNS, and no certificate authorities to function.
+
+**No load balancers.** Connections are direct, endpoint to endpoint. QUIC provides connection migration, so a connection survives network changes without re-establishment.
+
+**No service mesh.** Mutual authentication happens in the QUIC handshake. Both sides prove their identity cryptographically. There is no sidecar proxy, no Envoy, no Istio.
+
+**No DNS.** Endpoints are identified by public key, not hostname. Discovery uses iroh's built-in mechanisms: a distributed hash table, local network discovery (mDNS), or explicit address hints.
+
+**No certificate authorities.** Trust is rooted in an ed25519 keypair held offline by the operator. Enrollment credentials signed by this key authorize endpoints to join the mesh. There is no ACME, no Let's Encrypt, no certificate rotation infrastructure.
+
+This does not mean Aster cannot operate alongside traditional infrastructure. It means it does not *require* it. In environments where that infrastructure exists, Aster can coexist. In environments where it does not, Aster still works.
+
+## Portable trust
+
+Aster's trust model is based on credentials signed by an offline root key, not on network topology.
+
+An enrollment credential says: "this endpoint, identified by this public key, is authorized to participate with these attributes, until this expiry." It does not say anything about where the endpoint is running, what network it is on, or what IP address it has.
+
+This makes credentials portable. An endpoint authorized for a mesh can join from any network, any cloud, any location. The credential travels with the endpoint, not with the infrastructure. Revoking trust is epochal: the operator rotates the mesh salt, and excluded endpoints can no longer derive the gossip topic. No revocation lists, no OCSP, no CRL distribution points.
+
+## Language-native service definitions
+
+Aster services are defined using the native idioms of your language:
+
+```python
+# Python -- decorators on classes and methods
+@service(name="TaskManager", version=1)
+class TaskManagerService:
+
+    @rpc
+    async def assign_task(self, req: TaskAssignment) -> TaskAck:
+        ...
+
+    @server_stream
+    async def watch_progress(self, req: TaskId) -> AsyncIterator[ProgressEvent]:
+        ...
+```
+
+There is no `.proto` file. There is no code generation step. There is no build plugin. The service definition is your code, written in your language, using your types.
+
+> The Python examples above show the reference implementation. Other languages will use equivalent native idioms: annotations in Java/Kotlin, attributes in C#, derive macros in Rust.
+
+The framework inspects your service definition at registration time, extracts a canonical representation, and produces a `contract_id` (BLAKE3 hash) that uniquely identifies the interface. Two implementations of the same interface in different languages produce the same `contract_id`.
+
+## High-performance serialization
+
+Aster uses [Apache Fory](https://fury.apache.org) instead of Protocol Buffers. Fory serializes native language objects directly, with benchmark performance of 10--170x faster than protobuf depending on the workload.
+
+Three serialization modes serve different needs:
+
+- **XLANG**: Cross-language mode. Every type carries a wire tag (e.g., `"myapp.models/TaskAssignment"`), enabling any supported language to decode the payload. This is the default.
+- **NATIVE**: Single-language mode. Fastest possible serialization for same-language communication. A drop-in replacement for pickle (Python) or JDK serialization (Java).
+- **ROW**: Columnar format for data-heavy workloads. Zero-copy random access to individual fields without deserializing the entire message.
+
+Mode selection is per-service with per-method override. The wire protocol carries the mode in each stream header, so producer and consumer always agree on how to decode.
+
+## Content-addressed contracts
+
+Every service contract has a `contract_id`: the BLAKE3 hash of its canonical byte representation. This content address is the contract's identity -- not a version number, not a name, not a registry entry.
+
+Content addressing gives you:
+
+- **Version-safe discovery.** Consumers look up services by `contract_id`. If the interface changes, the hash changes, and stale consumers find no providers rather than getting deserialization errors.
+- **Cross-language verification.** The same interface defined in Python and Java produces the same `contract_id`. If the hashes match, the implementations are wire-compatible.
+- **No coordination.** There is no central authority assigning contract IDs. The hash is derived from the content. Two teams who independently define the same interface get the same ID.

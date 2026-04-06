@@ -1,0 +1,110 @@
+---
+id: session-scoped-services
+title: Session-scoped services
+slug: /concepts/session-scoped-services
+---
+
+Aster's default service model is stateless: each RPC call opens an independent QUIC stream, the server dispatches to a shared service instance, and no state accumulates between calls. This is the right default for most services.
+
+Session-scoped services are an alternative model for workloads that are inherently conversational. A session-scoped service creates a new instance per QUIC stream, maintains state across multiple sequential method calls, and tears down when the stream closes.
+
+## When you need sessions
+
+Some workloads have a natural lifecycle that spans multiple calls:
+
+- **Agent task sessions.** An AI agent opens a session, submits a task, receives step-by-step progress updates, adjusts parameters mid-execution, and collects results.
+- **Multiplayer lobbies.** Players join a lobby, exchange readiness signals, configure match settings, and launch the game -- all as typed method calls against shared mutable state.
+- **Collaborative editing.** A participant joins an editing session, sends changes, receives others' changes, and resolves conflicts using the session's accumulated state.
+- **Stateful negotiations.** Two parties exchange offers and counteroffers, each building on the previous state of the negotiation.
+
+Without session-scoped services, developers either maintain external session stores keyed by tokens, or collapse all their methods into a single bidirectional stream with envelope types and manual dispatch. Both approaches add complexity and lose the ergonomics of typed, multi-method service interfaces.
+
+## Two scoping modes
+
+The service scope is declared at the service level:
+
+| Scope | Instance per | Lifetime | State across calls |
+| --- | --- | --- | --- |
+| `shared` (default) | One for all peers | Server lifetime | None (stateless) |
+| `stream` | QUIC stream | Stream open to close | Yes (instance variables) |
+
+`shared` is the existing behavior -- a single service instance handles all incoming calls. `stream` creates a new instance for each QUIC stream, giving that instance private state for the duration of the session.
+
+```python
+from aster import service, rpc, server_stream, SerializationMode
+
+@service(name="AgentControl", version=1, scoped="stream",
+         serialization=[SerializationMode.XLANG])
+class AgentControlSession:
+
+    def __init__(self, peer: EndpointId):
+        # Called once when the session stream is accepted.
+        # `peer` is the remote endpoint's public key.
+        self.peer = peer
+        self.task_id = None
+        self.step_count = 0
+
+    @rpc
+    async def start_task(self, req: TaskSpec) -> TaskHandle:
+        self.task_id = generate_id()
+        return TaskHandle(task_id=self.task_id)
+
+    @server_stream
+    async def watch_steps(self, req: StepFilter) -> AsyncIterator[StepEvent]:
+        async for step in self._run_steps(req):
+            self.step_count += 1
+            yield step
+
+    @rpc
+    async def cancel(self, req: CancelRequest) -> CancelAck:
+        # Can access self.task_id, self.step_count -- session state
+        ...
+
+    async def on_session_close(self):
+        # Called when the stream closes (clean or abrupt).
+        # Clean up resources, persist final state, etc.
+        ...
+```
+
+> The example above uses Python, the reference implementation. Other languages will use equivalent idioms.
+
+## Sequential call semantics
+
+Calls within a session stream are strictly sequential. Only one method invocation is in flight at a time. This is enforced by a client-side async lock: when the consumer issues a call, the lock is acquired; when the response (or final streaming item) is received, the lock is released.
+
+This design eliminates several sources of complexity:
+
+**No correlation IDs.** There is only ever one outstanding request-response exchange on the stream. The response is unambiguously correlated to the most recent request.
+
+**No multiplexing.** Frames are never interleaved. The stream carries one call at a time in the same request-response sequence as stream-per-RPC.
+
+**No concurrency control on the server.** The handler processes one call at a time. Instance state (`self.*`) is accessed single-threaded with no locking required.
+
+## Parallelism via multiple sessions
+
+If a consumer needs parallel calls, it opens multiple sessions. Each session is an independent QUIC stream with an independent service instance. There is no limit on the number of concurrent sessions between two endpoints (beyond QUIC's stream limit on the connection).
+
+This is a deliberate trade-off: simplicity within a session (sequential, no locks, no correlation) at the cost of opening additional streams for parallelism. In practice, the use cases that benefit from session-scoped services -- agent interactions, collaborative editing, game lobbies -- are naturally sequential within a session.
+
+## Wire protocol
+
+A session-scoped service uses a persistent QUIC stream rather than a stream-per-RPC. The wire protocol extends the standard Aster framing:
+
+**Session stream header.** When the stream opens, the client sends a header with the method field set to empty string, signaling "this is a session stream, not a single-RPC stream."
+
+**Per-call CALL frames.** Each method invocation within the session sends a CALL frame containing the method name, followed by the serialized request. The server responds with the standard response framing (response payload, then status/trailers).
+
+**In-band cancellation.** A CANCEL frame cancels the current in-flight call without closing the stream. This preserves the session -- the instance survives and the next call can proceed. This is distinct from QUIC's RESET_STREAM, which kills the stream and tears down the session instance.
+
+## Lifecycle
+
+The lifecycle of a session-scoped service instance:
+
+1. A consumer opens a QUIC stream to the service with the session header.
+2. The server creates a new service instance, calling `__init__(peer)` with the remote endpoint's identity.
+3. The consumer makes sequential method calls on the stream. Each call is dispatched to the corresponding method on the instance.
+4. The consumer (or server) closes the stream.
+5. The server calls `on_session_close()` on the instance for cleanup.
+6. The instance is garbage collected.
+
+The stream lifecycle is the session lifecycle. There is no separate session ID, no session store, no explicit open/close protocol beyond the QUIC stream itself.

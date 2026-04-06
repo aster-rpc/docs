@@ -1,0 +1,115 @@
+---
+id: serialization
+title: Serialization
+slug: /concepts/serialization
+---
+
+Aster uses [Apache Fory](https://fury.apache.org) for serialization. Fory is a high-performance, cross-language serialization framework that operates on native language objects -- no IDL compilation required, no generated code to maintain.
+
+## Three serialization modes
+
+Fory provides three distinct serialization modes. Each serves a different use case, and Aster exposes all three. The mode is declared per-service, with per-method override available.
+
+### XLANG (cross-language)
+
+XLANG is the default mode. Every serialized type carries a wire tag -- a canonical string like `"myapp.models/TaskAssignment"` -- that allows any Fory-supported language to decode the payload. XLANG mode supports the full range of Fory's type system: primitives, strings, collections, nested objects, shared references, cycles, and polymorphism.
+
+Use XLANG when:
+- Producer and consumer may be in different languages.
+- You need cross-language interoperability without code generation.
+- You want a single wire format that any participant can decode.
+
+XLANG is the required mode for services published to the decentralised registry, since any language implementation may discover and call them.
+
+### NATIVE (single-language)
+
+NATIVE mode uses the language's own serialization primitives -- Fory replaces pickle in Python, JDK serialization in Java, and similar mechanisms in other languages. It produces the most compact payloads and the fastest serialization, but the output is only decodable by the same language.
+
+Use NATIVE when:
+- Both sides of the call are in the same language.
+- Maximum serialization performance is the priority.
+- Cross-language interoperability is not needed for this service.
+
+### ROW (zero-copy random access)
+
+ROW mode produces a columnar binary format that supports zero-copy field access. Individual fields can be read without deserializing the entire message. This is useful for data-heavy workloads where only a subset of fields is needed per operation, or where integration with columnar data systems (e.g., Apache Arrow) is valuable.
+
+Use ROW when:
+- Payloads are large and consumers often access only a few fields.
+- Partial deserialization improves performance.
+- Columnar data integration is needed.
+
+## Mode selection
+
+A service declares its default serialization mode. Individual methods can override it:
+
+```python
+from aster import service, rpc, server_stream, SerializationMode
+
+@service(
+    name="Analytics",
+    version=1,
+    serialization=[SerializationMode.XLANG],  # service default
+)
+class AnalyticsService:
+
+    @rpc  # inherits XLANG from service
+    async def submit_event(self, req: Event) -> Ack:
+        ...
+
+    @rpc(serialization=[SerializationMode.ROW])  # override to ROW
+    async def query_metrics(self, req: MetricsQuery) -> MetricsResult:
+        ...
+```
+
+> The example above uses Python, the reference implementation. Other languages will use equivalent idioms.
+
+The wire protocol carries the serialization mode in each stream header. The receiver always knows how to decode the incoming payload.
+
+**Cross-language enforcement.** If the client and server are different languages (detected during the connection handshake), only XLANG and ROW are permitted. NATIVE payloads from one language cannot be decoded by another. The framework rejects incompatible mode selections with an error rather than producing corrupt data.
+
+## Wire type tagging
+
+In XLANG mode, every type must have a canonical wire tag: a string that uniquely identifies the type across languages. The tag format is:
+
+```
+"{dotted.package}/{TypeName}"
+```
+
+For example: `"myapp.models/TaskAssignment"`, `"aster.agent/StepUpdate"`.
+
+In Python, wire types are registered with a decorator:
+
+```python
+from aster import wire_type
+from dataclasses import dataclass
+
+@wire_type("myapp.models/TaskAssignment")
+@dataclass
+class TaskAssignment:
+    task_id: str
+    agent_id: str
+    payload: bytes
+```
+
+> Other languages will use equivalent mechanisms -- annotations in Java, attributes in C#, macros in Rust.
+
+Tags are case-sensitive and must be identical across all language implementations of the same type. The namespace `_aster/*` is reserved for framework-internal types.
+
+**Auto-tagging.** During development, Fory can generate tags automatically from the class name and module path. The framework will warn when auto-generated tags are in use, since they may not be stable across languages or refactorings. Production services should use explicit tags.
+
+## Compression
+
+Aster supports zstd compression for wire payloads. Compression is applied after serialization and before framing. The default threshold is 4096 bytes -- payloads smaller than this are sent uncompressed, since the overhead of compression would outweigh the savings.
+
+Compression is transparent to the application. The stream header indicates whether compression is applied, and the receiver decompresses automatically.
+
+## Object graph support
+
+Unlike Protocol Buffers (which supports only tree-structured messages), Fory natively handles object graphs with:
+
+- **Shared references.** Two fields pointing to the same object are serialized once and reconstructed with shared identity on the receiver side.
+- **Cycles.** Circular references are handled without stack overflow or infinite recursion.
+- **Polymorphism.** A field declared as a base type can hold a subclass instance; the concrete type is preserved across serialization.
+
+This matters for domain models that naturally contain shared state or inheritance hierarchies. With protobuf, these must be flattened into tree structures with explicit ID references. With Fory, they serialize directly.

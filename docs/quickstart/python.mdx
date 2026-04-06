@@ -1,0 +1,43 @@
+---
+id: python
+title: Quickstart (Python)
+slug: /quickstart/python
+---
+
+import BindingBadge from '@site/src/components/BindingBadge';
+
+<BindingBadge label="Python · first-class" tone="stable" />
+
+This quickstart should show the shortest path from defining a service in code to dialing it by identity.
+
+## Install
+
+```bash
+uv add aster
+```
+
+## Define a service
+
+```python
+# TODO: replace with real API
+from aster import service
+
+@service
+class Greeter:
+    async def hello(self, name: str) -> str:
+        return f"hello {name}"
+```
+
+## Run it
+
+```bash
+uv run python greeter.py
+```
+
+## Dial it
+
+```python
+# TODO: replace with real API
+client = aster.connect("did:key:example")
+print(await client.hello("world"))
+```

@@ -1,0 +1,146 @@
+---
+id: hello-service
+title: Hello Service
+slug: /examples/hello-service
+---
+
+The simplest possible Aster service: a greeting RPC. Three files, no credentials, no infrastructure. This example is Python-specific.
+
+## The service definition
+
+Create `hello_service.py` with the shared type and service definitions:
+
+```python
+# hello_service.py
+from dataclasses import dataclass
+from aster.decorators import service, rpc
+
+@dataclass
+class HelloRequest:
+    name: str = ""
+
+@dataclass
+class HelloResponse:
+    message: str = ""
+
+@service
+class HelloService:
+    """Simple greeting service."""
+
+    @rpc
+    async def say_hello(self, req: HelloRequest) -> HelloResponse:
+        return HelloResponse(message=f"Hello, {req.name}!")
+```
+
+**Line by line:**
+
+- `@dataclass` defines plain data types for the request and response. Fields have defaults so Fory can construct them during deserialization.
+- `@service` marks the class as an Aster RPC service. The service name defaults to the class name (`HelloService`), version defaults to `1`.
+- `@rpc` marks `say_hello` as a unary RPC method. The framework inspects the type annotations (`HelloRequest` and `HelloResponse`) to handle serialization automatically.
+
+Since no `@wire_type` is applied, the `@service` decorator auto-tags the types using their module-qualified names. This is fine for development; production services should use explicit `@wire_type` tags.
+
+## The producer
+
+Create `producer.py` to host the service:
+
+```python
+# producer.py
+import asyncio
+from hello_service import HelloService
+from aster import AsterServer
+
+async def main():
+    async with AsterServer(services=[HelloService()]) as srv:
+        print(f"Endpoint address: {srv.endpoint_addr_b64}")
+        print("Waiting for connections... (Ctrl+C to stop)")
+        await srv.serve()
+
+asyncio.run(main())
+```
+
+**Line by line:**
+
+- `AsterServer(services=[HelloService()])` creates a producer that hosts one service. The server builds an iroh node, registers the `aster/1` ALPN for RPC, and runs the consumer admission ALPN for discovery.
+- `async with` calls `start()` (which creates the QUIC endpoint) and `serve()` (which starts the accept loop). On exit, it calls `close()`.
+- `srv.endpoint_addr_b64` is the base64-encoded `NodeAddr` that consumers need to connect.
+
+## The consumer
+
+Create `consumer.py` to call the service:
+
+```python
+# consumer.py
+import asyncio
+from hello_service import HelloService, HelloRequest
+from aster import AsterClient
+
+async def main():
+    async with AsterClient(endpoint_addr="<paste address from producer>") as client:
+        hello = await client.client(HelloService)
+        resp = await hello.say_hello(HelloRequest(name="World"))
+        print(resp.message)
+
+asyncio.run(main())
+```
+
+**Line by line:**
+
+- `AsterClient(endpoint_addr=...)` takes the base64 address printed by the producer. Alternatively, set `ASTER_ENDPOINT_ADDR` as an environment variable and omit the argument.
+- `async with` calls `connect()`, which creates a QUIC endpoint and runs the admission handshake to discover available services.
+- `client.client(HelloService)` returns a typed stub. The stub's `say_hello` method serializes the request, sends it over QUIC, deserializes the response, and returns it.
+
+## Running it
+
+Open two terminals. No credentials or configuration files are needed.
+
+**Terminal 1 -- producer:**
+
+```bash
+pip install aster-python
+python producer.py
+```
+
+Output:
+
+```
+Endpoint address: g6Jpa...kNQ==
+Waiting for connections... (Ctrl+C to stop)
+```
+
+**Terminal 2 -- consumer:**
+
+```bash
+# Option A: pass the address inline in the code
+python consumer.py
+
+# Option B: use an environment variable
+export ASTER_ENDPOINT_ADDR=g6Jpa...kNQ==
+python consumer.py
+```
+
+Output:
+
+```
+Hello, World!
+```
+
+## What is happening under the hood
+
+1. **QUIC endpoint creation.** Both producer and consumer create iroh QUIC endpoints. Each gets an ed25519 identity key (ephemeral by default) and connects to a relay server for NAT traversal.
+
+2. **ALPN negotiation.** The consumer first connects on the `aster.consumer_admission` ALPN. The producer responds with the list of available services (in this case, `HelloService` v1) and its RPC channel address.
+
+3. **Admission.** In dev mode (no root key configured), the producer auto-opens the consumer gate. The consumer is admitted without credentials.
+
+4. **RPC connection.** The consumer opens a second QUIC connection on the `aster/1` ALPN. This connection carries RPC traffic.
+
+5. **Call dispatch.** The consumer sends a `StreamHeader` (service name, method name, serialization mode), followed by the serialized `HelloRequest`. The producer deserializes it, calls `say_hello`, serializes the `HelloResponse`, and sends it back.
+
+6. **Cleanup.** When the `async with` blocks exit, both sides close their QUIC connections and endpoints.
+
+## Next steps
+
+- Add `@wire_type` tags for production stability: [Define a Service](/guides/define-a-service)
+- Connect with credentials: [Dial a Service](/guides/dial-a-service)
+- Add streaming methods: [Define a Service -- Streaming](/guides/define-a-service#server-streaming-server_stream)

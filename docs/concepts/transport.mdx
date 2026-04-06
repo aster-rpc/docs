@@ -1,0 +1,87 @@
+---
+id: transport
+title: Identity-first transport
+slug: /concepts/transport
+---
+
+Aster's transport layer is [iroh](https://iroh.computer): a networking library that provides QUIC connections identified by ed25519 public keys, with built-in NAT traversal and relay fallback.
+
+The transport layer is independent. You can use iroh without Aster for any application that needs encrypted, authenticated, peer-to-peer connectivity.
+
+## EndpointId: public key as address
+
+Every iroh endpoint has an ed25519 keypair. The public key is called the `EndpointId`. It serves as the endpoint's stable identity regardless of network location -- the same endpoint keeps the same `EndpointId` whether it is on a home Wi-Fi network, a corporate LAN, a mobile cellular connection, or a cloud VM.
+
+When you connect to a remote endpoint, you specify its `EndpointId`. The transport layer resolves that identity to a network path. The application never handles IP addresses directly.
+
+This is the foundational inversion: connections go to a cryptographic identity, not a network address.
+
+## QUIC over UDP
+
+iroh uses QUIC as its transport protocol. QUIC provides several properties that matter for distributed systems:
+
+**Stream independence.** Each QUIC stream has independent flow control. A lost packet on one stream does not stall any other stream. This eliminates the head-of-line blocking problem that affects HTTP/2 (and therefore gRPC) when multiplexing over TCP.
+
+**Connection migration.** QUIC connections are identified by a connection ID, not by the TCP 4-tuple (source IP, source port, destination IP, destination port). When an endpoint moves between networks -- Wi-Fi to cellular, one access point to another -- the connection continues without re-establishment.
+
+**Built-in encryption.** QUIC mandates TLS 1.3. In iroh, the TLS handshake authenticates both endpoints using their ed25519 keys. Every connection is end-to-end encrypted and mutually authenticated by construction.
+
+**Multiplexed streams.** A single QUIC connection supports many concurrent streams. Aster uses one stream per RPC call, so concurrent calls share a connection without interfering with each other.
+
+## NAT traversal
+
+Most devices on the internet are behind NATs. Establishing direct connections between two NAT'd devices is a solved but non-trivial problem. iroh handles it transparently.
+
+**Hole-punching.** When two endpoints want to connect, iroh coordinates a simultaneous connection attempt that allows both NATs to create the necessary mappings. This works for most consumer and enterprise NAT configurations.
+
+**Relay fallback.** When hole-punching fails -- for example, behind symmetric NATs or restrictive corporate firewalls -- iroh falls back to relay servers. Relay servers forward encrypted QUIC packets between endpoints. They cannot read the traffic (it is end-to-end encrypted) and they are not proxies in the application sense. They are infrastructure for connectivity, not for processing.
+
+**Path upgrades.** iroh continuously attempts to establish direct connections even when using a relay. If network conditions change and a direct path becomes available, iroh transparently migrates the connection. The application sees no interruption.
+
+## NodeAddr: how to find an endpoint
+
+An `EndpointId` identifies who you want to reach. A `NodeAddr` tells the transport how to find them:
+
+```
+NodeAddr {
+    endpoint_id: EndpointId       // required: who to connect to
+    relay_url: string?            // optional: relay server URL
+    direct_addresses: [SocketAddr] // optional: known IP:port pairs
+}
+```
+
+The `endpoint_id` is always required. The other fields are hints. If you provide a relay URL, iroh will use that relay for initial connectivity. If you provide direct addresses, iroh will try them first. If you provide nothing beyond the `EndpointId`, iroh will attempt to discover the endpoint using its configured discovery mechanisms (DNS, distributed hash table, local network discovery).
+
+In practice, endpoints exchange `NodeAddr` values (or the compact `NodeTicket` encoding) out of band to bootstrap connectivity.
+
+## ALPN protocol negotiation
+
+QUIC connections use ALPN (Application-Layer Protocol Negotiation) to agree on which protocol to speak. iroh supports multiple ALPNs on a single endpoint:
+
+- `aster/1` -- the Aster RPC protocol
+- `iroh-blobs` -- content-addressed blob transfer
+- `iroh-gossip` -- pub-sub messaging
+- `aster.producer_admission` -- producer enrollment
+- `aster.consumer_admission` -- consumer enrollment
+
+A single iroh endpoint can serve all of these simultaneously. One connection to a peer can carry RPC calls, blob transfers, and gossip messages, each on separate QUIC streams identified by their ALPN.
+
+## Unified node
+
+Aster runs as a unified node: a single iroh endpoint that serves RPC, blobs, documents, and gossip. There is no separate "blob server" or "gossip server." All capabilities share the same endpoint identity, the same QUIC connections, and the same NAT traversal infrastructure.
+
+This means a service that needs to transfer large files can use iroh-blobs alongside its RPC methods. A service that needs real-time notifications can use iroh-gossip. A service that needs replicated state can use iroh-docs. All of these use the same `EndpointId` and the same connections.
+
+## Connection model summary
+
+The lifecycle of a connection:
+
+1. The caller knows the remote endpoint's `EndpointId` (and optionally a relay URL or direct addresses).
+2. The caller dials the `EndpointId` with an ALPN (e.g., `aster/1`).
+3. iroh resolves the `EndpointId` to a network path -- direct if possible, relayed if not.
+4. A QUIC handshake authenticates both endpoints using their ed25519 keys.
+5. The connection is established. Both sides can open streams.
+6. Each RPC call opens a new bidirectional QUIC stream on the existing connection.
+7. If the network path changes, QUIC connection migration keeps the connection alive.
+
+No DNS lookup. No certificate verification against a CA. No load balancer in the middle. The transport proves identity, establishes connectivity, and gets out of the way.

@@ -1,0 +1,185 @@
+---
+id: cli
+title: CLI Reference
+slug: /reference/cli
+---
+
+The `aster` command-line tool provides offline utilities for managing profiles, enrolling nodes, generating contract manifests, and inspecting configuration. It does not run a server or client -- those are started from Python code using `AsterServer` and `AsterClient`.
+
+## Installation
+
+The CLI is included in the `aster-python` package:
+
+```bash
+pip install aster-python
+```
+
+Or install the CLI separately from the `cli/` directory:
+
+```bash
+pip install -e cli/
+```
+
+## Commands
+
+### `aster contract gen`
+
+Generate a contract manifest for one or more services. This computes the deterministic `contract_id` for each service version and writes it to a JSON manifest file. No network connection or credentials required.
+
+```bash
+aster contract gen --service my_module:MyServiceClass --out .aster/manifest.json
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `--service MODULE:CLASS` | Python import path to the `@service`-decorated class. May be specified multiple times. |
+| `--out PATH` | Output path for the manifest JSON file. Default: `.aster/manifest.json`. |
+
+The manifest is checked at `AsterServer` startup. If a service's live `contract_id` does not match the committed manifest, the server refuses to start. This prevents accidental wire-breaking changes.
+
+**Example workflow:**
+
+```bash
+# Generate manifest
+aster contract gen --service myapp.services:TaskService --out .aster/manifest.json
+
+# Commit the manifest
+git add .aster/manifest.json && git commit -m "Update contract manifest"
+
+# Server validates on startup
+python producer.py  # fails if interface changed without updating manifest
+```
+
+### `aster trust keygen`
+
+Generate cryptographic keys for the Aster trust model.
+
+```bash
+# Generate a root keypair (operator's offline machine)
+aster trust keygen root --out root.key
+
+# Extract the public key from a root keypair
+aster trust keygen pubkey --in root.key --out root_pub.key
+```
+
+The root keypair file is JSON containing `private_key` and `public_key` as hex strings. The public key file contains just the hex-encoded 32-byte public key.
+
+### `aster trust sign`
+
+Sign enrollment credentials for consumers or producers.
+
+```bash
+# Sign a consumer enrollment credential
+aster trust sign consumer \
+  --root-key root.key \
+  --type policy \
+  --expires 30d \
+  --out consumer.token
+
+# Sign with specific attributes
+aster trust sign consumer \
+  --root-key root.key \
+  --type policy \
+  --attr team=billing \
+  --attr tier=premium \
+  --expires 90d \
+  --out consumer.token
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `--root-key PATH` | Path to the root keypair file. |
+| `--type TYPE` | Credential type: `policy` (long-lived) or `ott` (one-time token). |
+| `--expires DURATION` | Expiry: relative (`30d`, `24h`) or absolute ISO 8601 (`2025-12-31T23:59:59`). Default: 30 days. |
+| `--attr KEY=VALUE` | Attribute key-value pair. May be specified multiple times. |
+| `--endpoint-id HEX` | Bind the credential to a specific endpoint ID. |
+| `--out PATH` | Output path for the signed credential JSON. |
+
+### `aster enroll node`
+
+Generate (or reuse) a node keypair, sign an enrollment credential, and write or update the `.aster-identity` file. This is the primary operator workflow for adding nodes to a mesh.
+
+```bash
+# Enroll a producer node
+aster enroll node \
+  --profile prod \
+  --role producer \
+  --name billing-producer
+
+# Enroll a consumer node
+aster enroll node \
+  --profile prod \
+  --role consumer \
+  --name analytics-consumer \
+  --identity .aster-identity
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `--profile NAME` | Profile to use (determines root key). Default: active profile. |
+| `--role ROLE` | Node role: `producer` or `consumer`. |
+| `--name NAME` | Human-readable name for the peer entry. |
+| `--identity PATH` | Path to the `.aster-identity` file. Default: `.aster-identity` in current directory. |
+| `--expires DURATION` | Credential expiry. Default: 30 days. |
+
+The command reads the root private key from the OS keyring (stored by `aster profile create`), generates or reuses the node's secret key, computes the `EndpointId`, signs a credential, and appends a `[[peers]]` entry to the identity file.
+
+### `aster profile`
+
+Manage operator profiles. Profiles represent deployment meshes (dev, staging, prod) and store the root public key. The root private key is stored in the OS keyring.
+
+```bash
+# Create a new profile (generates root keypair, stores private key in keyring)
+aster profile create prod
+
+# List all profiles
+aster profile list
+
+# Switch active profile
+aster profile use prod
+
+# Show profile details
+aster profile show prod
+
+# Delete a profile
+aster profile delete staging
+```
+
+### `aster config show`
+
+Display the resolved configuration with provenance tracking. Equivalent to calling `AsterConfig.from_env().print_config()`.
+
+```bash
+aster config show
+aster config show --json
+```
+
+## Profile system
+
+Profiles are stored in `~/.aster/config.toml`:
+
+```toml
+active_profile = "prod"
+
+[profiles.dev]
+root_pubkey = "<hex>"
+created_at = "2025-01-15T10:30:00"
+
+[profiles.prod]
+root_pubkey = "<hex>"
+created_at = "2025-01-20T14:00:00"
+```
+
+The corresponding root private keys are stored in the OS keyring under the key `aster-root-<profile-name>`. The private key never touches the filesystem.
+
+## `.aster-identity` file
+
+The `.aster-identity` file is a TOML file containing a node's secret key and enrollment credentials. It is generated by `aster enroll node` and consumed by `AsterServer` and `AsterClient` at startup.
+
+See [Configuration](/reference/configuration) for the file format and how it integrates with `AsterConfig`.
