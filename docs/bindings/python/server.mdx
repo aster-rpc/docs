@@ -165,15 +165,14 @@ await srv.close()  # safe to call multiple times
 
 This is the key architectural insight: `AsterServer` builds ONE iroh node with ONE endpoint ID. That single endpoint serves:
 
-```
-One iroh endpoint
-  |
-  +-- BLOBS_ALPN          --> iroh-blobs protocol handler
-  +-- DOCS_ALPN           --> iroh-docs protocol handler
-  +-- GOSSIP_ALPN         --> iroh-gossip protocol handler
-  +-- b"aster/1"          --> AsterQueueHandler --> RPC Server
-  +-- b"aster.consumer_admission"  --> AsterQueueHandler --> admission handler
-  +-- b"aster.producer_admission"  --> AsterQueueHandler --> mesh admission handler
+```mermaid
+graph LR
+    E["One iroh endpoint"] --> B["BLOBS_ALPN → iroh-blobs"]
+    E --> D["DOCS_ALPN → iroh-docs"]
+    E --> G["GOSSIP_ALPN → iroh-gossip"]
+    E --> R["aster/1 → RPC Server"]
+    E --> CA["aster.consumer_admission → admission handler"]
+    E --> PA["aster.producer_admission → mesh admission"]
 ```
 
 Why this matters: peers connect once and can use any protocol. A consumer that has been admitted through the admission handshake can then call RPC methods, fetch blobs, subscribe to gossip topics, and sync docs -- all through the same QUIC connection pool, the same relay, the same node ID.

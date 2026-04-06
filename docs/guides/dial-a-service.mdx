@@ -78,7 +78,7 @@ aster enroll node --profile prod --role consumer --name my-consumer
 ASTER_ENDPOINT_ADDR=<addr> python consumer.py
 ```
 
-See [AsterClient](/bindings/python/client) for the full Python API reference.
+See [AsterClient](/docs/bindings/python/client) for the full Python API reference.
 
 
 ## 2. Aster shell (for exploration and debugging)
@@ -118,7 +118,17 @@ producer:/services/HelloService$ ./say_hello name="World"
 }
 ```
 
-### How it discovers methods without local types
+### Dynamic invocation without local types
+
+The shell does not just discover methods -- it can invoke them too, without any
+local type definitions. When connected to a peer, the shell reads contract
+manifests and synthesizes wire-compatible types at runtime. Field names, types,
+defaults, and Fory wire tags are all extracted from the manifest, so the shell
+can build correctly serialized requests on the fly. This means you can explore
+AND invoke any service from the shell without installing the service's client
+package.
+
+### How it discovers methods
 
 The shell reads the service contract from the producer's registry:
 
@@ -149,7 +159,7 @@ aster blob ls <peer>
 aster blob cat <peer> <hash>
 ```
 
-See [Shell internals](/bindings/python/shell) for the full command reference.
+See the CLI Reference for the full command reference.
 
 
 ## 3. Raw transport (for custom tooling)
@@ -177,16 +187,16 @@ The raw transport still requires serializable request/response types. For truly 
 
 Regardless of which approach you use, every consumer goes through the same admission flow:
 
-```
-Consumer                                    Producer
-    |                                          |
-    |--- QUIC connect (aster.consumer_admission) -->|
-    |--- credential (or empty for dev mode) ------->|
-    |                                          | verify / auto-admit
-    |<--- services list + registry ticket ----------|
-    |                                          |
-    |--- QUIC connect (aster/1) --------------->|
-    |--- RPC calls ---------------------------->|
+```mermaid
+sequenceDiagram
+    participant C as Consumer
+    participant P as Producer
+    C->>P: QUIC connect (aster.consumer_admission)
+    C->>P: credential (or empty for dev mode)
+    P->>P: verify / auto-admit
+    P-->>C: services list + registry ticket
+    C->>P: QUIC connect (aster/1)
+    C->>P: RPC calls
 ```
 
 The admission response gives the consumer:

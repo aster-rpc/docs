@@ -1,12 +1,85 @@
 ---
 id: first-service
-title: Your first service
+title: "What's next"
 slug: /quickstart/first-service
+sidebar_position: 2
+description: After the quickstart — explore your service, connect AI agents, and prepare for production.
 ---
 
-## What this teaches
+# What's next
 
-- Define a service in code
-- Run locally
-- Connect by identity
-- Observe the contract surface
+You have a working service from the [Python quickstart](/docs/quickstart/python). Here's where to go from here.
+
+## Explore your service with the shell
+
+The Aster shell lets you browse services, inspect contracts, and invoke methods interactively — without needing any type definitions locally.
+
+```bash
+aster shell <endpoint-addr>
+```
+
+Navigate services like a filesystem, tab-complete method names, and invoke RPCs from the command line:
+
+```bash
+producer:/$ cd services/HelloService
+producer:/services/HelloService$ ./say_hello name="World"
+{
+  "message": "Hello, World!"
+}
+```
+
+See [Dial a Service](/docs/guides/dial-a-service) for the full shell guide.
+
+
+## Connect an AI agent
+
+Expose your service to Claude or any MCP-compatible AI agent with a single command:
+
+```bash
+aster mcp <endpoint-addr>
+```
+
+Every `@rpc` method becomes a tool the agent can discover and call. No OpenAPI specs, no REST gateways — the contract is the tool definition.
+
+See [AI Agent Integration (MCP)](/docs/guides/mcp-integration) for security layers and configuration.
+
+
+## Define richer services
+
+The quickstart used a single unary method. Aster supports:
+
+- **Server streaming** (`@server_stream`) — stream results to the caller
+- **Client streaming** (`@client_stream`) — receive a stream of requests
+- **Bidirectional streaming** (`@bidi_stream`) — both sides stream concurrently
+- **Session-scoped services** — stateful, per-peer instances
+
+See [Defining Services and Types](/docs/guides/services) for the full decorator reference.
+
+
+## Prepare for production
+
+In dev mode, Aster auto-admits every peer. For production you need identity and trust:
+
+```bash
+# Generate a root key
+aster trust keygen --out root.key
+
+# Sign credentials for your producer and consumers
+aster trust sign --root-key root.key --type producer --out producer.token
+aster trust sign --root-key root.key --type consumer --out consumer.token
+
+# Enroll a node with its credential
+aster enroll node --profile prod --rcan producer.token
+```
+
+See [Trust Model](/docs/concepts/trust-model) for the full four-gate authorization model, and [Configuration](/docs/reference/configuration) for all settings.
+
+
+## Learn the concepts
+
+| Topic | What you'll learn |
+|-------|------------------|
+| [Transport](/docs/concepts/transport) | How Aster connects peers by public key with NAT traversal |
+| [Contract identity](/docs/concepts/contract-identity) | How services get deterministic, content-addressed identities |
+| [Serialization](/docs/concepts/serialization) | The three serialization modes and when to use each |
+| [Discovery](/docs/concepts/discovery) | How services are published and resolved without central infrastructure |

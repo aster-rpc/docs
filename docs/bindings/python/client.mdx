@@ -296,18 +296,24 @@ python consumer.py
 
 ## Sequence diagram
 
-```
-Consumer (AsterClient)                    Producer (AsterServer)
-    |                                          |
-    |--- QUIC connect (aster.consumer_admission ALPN) -->|
-    |--- ConsumerAdmissionRequest (credential JSON) ---->|
-    |                                          | verify credential (or auto-admit)
-    |                                          | add peer to Gate 0 allowlist
-    |<--- ConsumerAdmissionResponse (services list) ----|
-    |                                          |
-    |--- QUIC connect (aster/1 ALPN) -------->|  (Gate 0 allows: peer is admitted)
-    |--- StreamHeader (service, method) ------>|
-    |--- Request frame ----------------------->|
-    |<--- Response frame ----------------------|
-    |<--- OK trailer -------------------------|
+```mermaid
+sequenceDiagram
+    participant C as Consumer (AsterClient)
+    participant P as Producer (AsterServer)
+    rect rgba(120, 166, 255, 0.05)
+    Note over C,P: Admission phase
+    C->>P: QUIC connect (aster.consumer_admission ALPN)
+    C->>P: ConsumerAdmissionRequest (credential JSON)
+    P->>P: verify credential (or auto-admit)
+    P->>P: add peer to Gate 0 allowlist
+    P-->>C: ConsumerAdmissionResponse (services list)
+    end
+    rect rgba(97, 214, 194, 0.05)
+    Note over C,P: RPC phase
+    C->>P: QUIC connect (aster/1 ALPN)
+    C->>P: StreamHeader (service, method)
+    C->>P: Request frame
+    P-->>C: Response frame
+    P-->>C: OK trailer
+    end
 ```

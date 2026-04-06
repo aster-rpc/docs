@@ -34,16 +34,16 @@ With these constraints, a conforming Fory implementation in any language produce
 
 Types reference each other by hash, forming a Merkle DAG (directed acyclic graph):
 
-```
-            ServiceContract
-            hash: 9f3a...
-           /       |       \
-    MethodDef  MethodDef  MethodDef
-   /        \
-TypeDef      TypeDef
-hash: abc1.. hash: def4..
-   |            |
-FieldDef     FieldDef --> TypeDef (hash: 77b2...)
+```mermaid
+graph TD
+    SC["ServiceContract<br/><small>hash: 9f3a...</small>"] --> M1["MethodDef"]
+    SC --> M2["MethodDef"]
+    SC --> M3["MethodDef"]
+    M1 --> T1["TypeDef<br/><small>hash: abc1...</small>"]
+    M1 --> T2["TypeDef<br/><small>hash: def4...</small>"]
+    T1 --> F1["FieldDef"]
+    T2 --> F2["FieldDef"]
+    F2 --> T3["TypeDef<br/><small>hash: 77b2...</small>"]
 ```
 
 Each `TypeDef` is independently hashed. A `MethodDef` references its request and response types by hash. A `ServiceContract` references its methods. Changing any type in the graph changes its hash, which propagates upward through every contract that references it.

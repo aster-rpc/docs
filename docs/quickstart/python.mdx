@@ -154,13 +154,13 @@ ASTER_ENDPOINT_ADDR=<producer addr> python consumer.py
 
 You can enroll the same node multiple times (e.g., as a producer in one mesh and a consumer in another) -- each `aster enroll node` call adds a `[[peers]]` entry to the `.aster-identity` file.
 
-See [Configuration](/reference/configuration) for the full list of environment variables and TOML settings, and [Trust and admission](/concepts/trust-model) for the security model.
+See [Configuration](/docs/reference/configuration) for the full list of environment variables and TOML settings, and [Trust and admission](/docs/concepts/trust-model) for the security model.
 
 ## What's next
 
-- [Defining services and types](/guides/services) -- streaming RPCs, `@wire_type`, contract identity.
-- [Configuration](/reference/configuration) -- `AsterConfig`, TOML files, environment variables.
-- [Trust and admission](/concepts/trust-model) -- root keys, enrollment credentials, the Gate model.
-- [AsterServer](/bindings/python/server) -- blobs, docs, gossip, Gate 0 wiring.
-- [AsterClient](/bindings/python/client) -- admission flow, typed clients, error handling.
-- [Observability](/guides/observability) -- structured logging, OTel metrics, health endpoints.
+- [Defining services and types](/docs/guides/services) -- streaming RPCs, `@wire_type`, contract identity.
+- [Configuration](/docs/reference/configuration) -- `AsterConfig`, TOML files, environment variables.
+- [Trust and admission](/docs/concepts/trust-model) -- root keys, enrollment credentials, the Gate model.
+- [AsterServer](/docs/bindings/python/server) -- blobs, docs, gossip, Gate 0 wiring.
+- [AsterClient](/docs/bindings/python/client) -- admission flow, typed clients, error handling.
+- [Observability](/docs/guides/observability) -- structured logging, OTel metrics, health endpoints.

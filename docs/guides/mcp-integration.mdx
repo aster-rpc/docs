@@ -26,20 +26,22 @@ That's it. Claude (or any MCP-compatible agent) can now discover and call your s
 
 ## How it works
 
-```
-Claude / AI Agent
-      |  stdio (JSON-RPC 2.0)
-      v
-aster mcp (MCP server)
-      |  Aster RPC (QUIC)
-      v
-Your Service (P2P via Iroh)
+```mermaid
+graph TD
+    A["Claude / AI Agent"] -->|"stdio (JSON-RPC 2.0)"| B["aster mcp (MCP server)"]
+    B -->|"Aster RPC (QUIC)"| C["Your Service (P2P via Iroh)"]
 ```
 
 1. `aster mcp` connects to the producer and runs the admission handshake
 2. It reads contract manifests from the registry to discover method schemas
 3. Each method becomes an MCP tool with a JSON Schema derived from the request type fields
 4. Tool calls are forwarded as Aster RPC calls; results returned as JSON
+
+The MCP server does not merely list available methods -- it uses dynamic type
+synthesis to actually invoke them. Contract manifests include Fory wire tags
+for every field, so the server can build correctly serialized typed requests
+directly from the agent's JSON arguments. No local Python type definitions or
+generated stubs are needed.
 
 The agent sees tools like:
 

@@ -50,7 +50,14 @@ config = AsterConfig(root_pubkey=pub_bytes, allow_all_consumers=True)
 
 | Field | Type | Default | Env var | Description |
 |-------|------|---------|---------|-------------|
-| `storage_path` | `str` or `None` | `None` | `ASTER_STORAGE_PATH` | Path for persistent storage. If unset, uses in-memory storage. |
+| `storage_path` | `str` or `None` | `None` | `ASTER_STORAGE_PATH` | Path for persistent storage (FsStore). Enables docs and blobs to survive restarts. If unset, uses in-memory storage. |
+
+### Health fields
+
+| Field | Type | Default | Env var | Description |
+|-------|------|---------|---------|-------------|
+| `health_port` | `int` | `0` | `ASTER_HEALTH_PORT` | Port for health HTTP server. `0` disables the server (default). |
+| `health_host` | `str` | `127.0.0.1` | `ASTER_HEALTH_HOST` | Bind address for the health server. Use `0.0.0.0` inside containers. |
 
 ### Network fields
 
@@ -117,6 +124,10 @@ ASTER_ENDPOINT_ADDR=<base64 NodeAddr>
 
 # Storage
 ASTER_STORAGE_PATH=/var/lib/aster
+
+# Health
+ASTER_HEALTH_PORT=0            # Port for health HTTP server (0=disabled, default)
+ASTER_HEALTH_HOST=127.0.0.1   # Bind address for health server
 
 # Network
 ASTER_SECRET_KEY=<base64-encoded 32 bytes>
@@ -220,7 +231,7 @@ level = "info"
 mask = true
 ```
 
-See the [Observability guide](/guides/observability) for full details on structured logging, OTel metrics, and distributed tracing.
+See the [Observability guide](/docs/guides/observability) for full details on structured logging, OTel metrics, and distributed tracing.
 
 ## Dev mode auto-detection
 

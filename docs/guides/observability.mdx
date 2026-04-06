@@ -217,6 +217,7 @@ The health endpoint exposes operational metrics that should not be publicly acce
 | `GET /healthz` | 200 | 503 | Liveness probe — server is running |
 | `GET /readyz` | 200 | 503 | Readiness probe — contracts published, accepting traffic |
 | `GET /metrics` | 200 | — | Full metrics snapshot (JSON) |
+| `GET /metrics/prometheus` | 200 | — | Metrics in Prometheus text exposition format |
 
 ### Response examples
 
@@ -330,6 +331,55 @@ Import it into Grafana for instant visibility:
 2. Upload `ops/grafana-dashboard.json`
 3. Select your Prometheus data source
 4. The dashboard uses OTel metric names (`aster_rpc_started_total`, etc.)
+
+## Rate limiting
+
+The `RateLimitInterceptor` enforces token-bucket rate limits at multiple
+granularities. Add it to your server's interceptor chain:
+
+```python
+from aster.interceptors import RateLimitInterceptor
+
+rate_limiter = RateLimitInterceptor(
+    global_rps=1000,          # whole-server cap
+    per_service_rps=500,      # per service name
+    per_method_rps=100,       # per individual method
+    per_peer_rps=50,          # per connected peer
+)
+
+server = AsterServer(
+    services=[MyService()],
+    interceptors=[rate_limiter, MetricsInterceptor()],
+)
+```
+
+Each bucket refills independently at its configured rate. When a request
+exceeds any applicable limit, the interceptor returns `RESOURCE_EXHAUSTED`
+with a `Retry-After` hint in the error metadata.
+
+## Graceful shutdown
+
+`AsterServer` supports graceful shutdown so in-flight RPCs can complete before
+the process exits.
+
+```python
+async with AsterServer(services=[MyService()]) as srv:
+    # Install handlers for SIGTERM and SIGINT
+    srv.install_signal_handlers()
+    await srv.serve()
+```
+
+When a signal arrives, `srv.drain()` is called automatically:
+
+1. The server stops accepting new connections and new RPC calls.
+2. In-flight RPCs are given a grace period (default 30 seconds) to complete.
+3. After the grace period, remaining calls are cancelled and the server shuts down.
+
+You can also trigger a drain programmatically:
+
+```python
+await srv.drain(timeout_s=15)
+```
 
 ## TOML configuration example
 
