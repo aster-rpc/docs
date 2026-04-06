@@ -109,7 +109,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Aster.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Emrul Islam. All rights reserved.`,
     },
     prism: {
       additionalLanguages: ['python', 'rust', 'java', 'csharp', 'go', 'bash', 'json'],
