@@ -271,3 +271,415 @@ html[data-theme='light'] .asterDiagram__layer {
     padding-top: 4.8rem;
   }
 }
+
+
+/* ── Docs content typography ──────────────────────────────────────────────── */
+/* Narrow content column for comfortable reading (65-75 chars per line)      */
+
+.markdown {
+  max-width: 42rem;
+  font-size: 0.96rem;
+  line-height: 1.72;
+}
+
+/* Headings — tighter tracking, more vertical breathing room */
+.markdown h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 0;
+  margin-bottom: 1.25rem;
+  line-height: 1.2;
+}
+
+.markdown h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid rgba(120, 166, 255, 0.1);
+  line-height: 1.3;
+}
+
+.markdown h3 {
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.35;
+}
+
+.markdown h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.4rem;
+}
+
+/* Paragraphs — comfortable spacing */
+.markdown p {
+  margin-bottom: 1rem;
+}
+
+/* Tighten gap between paragraph and the code block that follows */
+.markdown p + .theme-code-block {
+  margin-top: -0.25rem;
+}
+
+/* Lists — tighter than paragraphs */
+.markdown ul,
+.markdown ol {
+  margin-bottom: 1rem;
+  padding-left: 1.5rem;
+}
+
+.markdown li {
+  margin-bottom: 0.35rem;
+}
+
+.markdown li > p {
+  margin-bottom: 0.35rem;
+}
+
+/* Tables — compact, subtle, aligned with Astro's style */
+.markdown table {
+  display: table;
+  width: 100%;
+  font-size: 0.88rem;
+  border-collapse: collapse;
+  margin-bottom: 1.25rem;
+}
+
+.markdown th {
+  font-weight: 600;
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 2px solid rgba(120, 166, 255, 0.15);
+  white-space: nowrap;
+}
+
+.markdown td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(120, 166, 255, 0.07);
+  vertical-align: top;
+}
+
+.markdown tr:last-child td {
+  border-bottom: none;
+}
+
+/* Remove Infima's heavy table styling */
+.markdown table th,
+.markdown table td {
+  border-left: none;
+  border-right: none;
+}
+
+html[data-theme='light'] .markdown th {
+  border-bottom-color: rgba(0, 0, 0, 0.12);
+}
+
+html[data-theme='light'] .markdown td {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+/* ── Code blocks ──────────────────────────────────────────────────────── */
+
+/* rehype-pretty-code / Shiki output */
+.markdown [data-rehype-pretty-code-fragment] {
+  margin-bottom: 1.25rem;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 166, 255, 0.1);
+  overflow: hidden;
+  background: #161b22;
+}
+
+html[data-theme='light'] .markdown [data-rehype-pretty-code-fragment] {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.15);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.markdown [data-rehype-pretty-code-fragment] pre {
+  margin: 0;
+  overflow-x: auto;
+  padding: 0.875rem 0;
+}
+
+.markdown [data-rehype-pretty-code-fragment] code {
+  display: grid;
+  min-width: 100%;
+  color: inherit;
+  box-sizing: border-box;
+}
+
+.markdown [data-rehype-pretty-code-fragment] pre code {
+  background: none;
+  border: none;
+  border-radius: 0;
+  counter-reset: line;
+  padding: 0 1.25rem;
+}
+
+.markdown [data-rehype-pretty-code-fragment] [data-line] {
+  display: block;
+  min-height: 1.5em;
+  width: calc(100% + 2.5rem);
+  margin-left: -1.25rem;
+  margin-right: -1.25rem;
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+  box-sizing: border-box;
+}
+
+.markdown [data-rehype-pretty-code-fragment] [data-highlighted-line] {
+  background: rgba(230, 192, 107, 0.12);
+}
+
+html[data-theme='light'] .markdown [data-rehype-pretty-code-fragment] [data-highlighted-line] {
+  background: rgba(230, 192, 107, 0.18);
+}
+
+.markdown [data-rehype-pretty-code-fragment] [data-highlighted-chars] {
+  border-radius: 0.25rem;
+  padding: 0.08rem 0.2rem;
+  background: rgba(120, 166, 255, 0.16);
+}
+
+html[data-theme='light'] .markdown [data-rehype-pretty-code-fragment] [data-highlighted-chars] {
+  background: rgba(130, 80, 223, 0.12);
+}
+
+/* Outer wrapper — clean, flush, minimal chrome */
+.markdown .theme-code-block {
+  margin-bottom: 1.25rem;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 166, 255, 0.1);
+  overflow: hidden;
+  background: #161b22;
+}
+
+html[data-theme='light'] .markdown .theme-code-block {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.15);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* The pre inside — crisp, compact */
+.markdown pre {
+  font-family: var(--aster-font-mono);
+  font-size: 0.835rem;
+  line-height: 1.5;
+  padding: 0.75rem 1rem;
+  margin: 0;
+  border-radius: 0;
+  background: transparent !important;
+  border: none;
+}
+
+/* Collapse blank lines in code blocks — half height */
+.markdown pre .token-line:empty,
+.markdown pre span[class*='token-line']:only-child:empty {
+  display: block;
+  height: 0.5em;
+}
+
+/* Prism renders blank lines as a span with just a newline — reduce their height */
+.markdown pre code > span:not(:has(.token)) {
+  display: block;
+  height: 0.65em;
+}
+
+/* Code block title/filename tab — Astro-style flush label */
+.theme-code-block .theme-code-block-title {
+  font-family: var(--aster-font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 0.35rem 1rem;
+  border-bottom: 1px solid rgba(120, 166, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.45);
+  margin: 0;
+}
+
+html[data-theme='light'] .theme-code-block .theme-code-block-title {
+  background: #f6f8fa;
+  border-bottom-color: rgba(0, 0, 0, 0.07);
+  color: rgba(0, 0, 0, 0.55);
+}
+
+/* Copy button — hidden until hover */
+.theme-code-block button[class*='copyButton'] {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.theme-code-block:hover button[class*='copyButton'] {
+  opacity: 0.4;
+}
+
+.theme-code-block button[class*='copyButton']:hover {
+  opacity: 1;
+}
+
+/* Line highlighting — warm tint like Astro */
+.theme-code-block .docusaurus-highlight-code-line {
+  background: rgba(230, 192, 107, 0.1);
+  display: block;
+  margin: 0 -1rem;
+  padding: 0 1rem;
+}
+
+html[data-theme='light'] .theme-code-block .docusaurus-highlight-code-line {
+  background: rgba(230, 192, 107, 0.15);
+}
+
+/* Override Prism's background in light mode to be white, not grey */
+html[data-theme='light'] .markdown pre,
+html[data-theme='light'] .prism-code {
+  background: #ffffff !important;
+}
+
+/* Ensure token colors are strong in light mode */
+html[data-theme='light'] .token.keyword { color: #cf222e; }
+html[data-theme='light'] .token.string { color: #0a3069; }
+html[data-theme='light'] .token.function { color: #8250df; }
+html[data-theme='light'] .token.comment { color: #6e7781; }
+html[data-theme='light'] .token.class-name { color: #953800; }
+html[data-theme='light'] .token.operator { color: #0550ae; }
+html[data-theme='light'] .token.builtin { color: #0550ae; }
+html[data-theme='light'] .token.number { color: #0550ae; }
+html[data-theme='light'] .token.boolean { color: #cf222e; }
+html[data-theme='light'] .token.decorator { color: #8250df; }
+
+/* ── Inline code ──────────────────────────────────────────────────────── */
+
+.markdown code {
+  font-family: var(--aster-font-mono);
+  font-size: 0.84em;
+  font-weight: 450;
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+  background: rgba(120, 166, 255, 0.07);
+  border: none;
+  color: inherit;
+}
+
+html[data-theme='light'] .markdown code {
+  background: rgba(175, 184, 193, 0.2);
+}
+
+/* Don't double-style code inside pre blocks */
+.markdown pre code {
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: inherit;
+  font-weight: inherit;
+  border-radius: 0;
+}
+
+/* ── Bash/shell blocks — slightly different treatment ─────────────────── */
+.markdown .language-bash pre,
+.markdown .language-shell pre,
+.markdown .language-sh pre {
+  font-size: 0.82rem;
+}
+
+/* ── Fenced text blocks (no language) — like diagrams ─────────────────── */
+.markdown .language-text pre {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+html[data-theme='light'] .markdown .language-text pre {
+  color: rgba(0, 0, 0, 0.65);
+}
+
+/* Blockquotes */
+.markdown blockquote {
+  border-left: 3px solid rgba(120, 166, 255, 0.3);
+  padding: 0.1rem 1rem;
+  margin: 1rem 0;
+  color: var(--ifm-font-color-base);
+  opacity: 0.85;
+}
+
+/* Admonitions — tighter */
+.markdown .admonition {
+  margin-bottom: 1.25rem;
+  border-radius: 10px;
+  font-size: 0.92rem;
+}
+
+/* Horizontal rules */
+.markdown hr {
+  border: none;
+  border-top: 1px solid rgba(120, 166, 255, 0.1);
+  margin: 2rem 0;
+}
+
+/* Strong — slightly heavier for dark backgrounds */
+.markdown strong {
+  font-weight: 650;
+}
+
+/* Links — subtle underline on hover */
+.markdown a {
+  text-decoration: none;
+}
+
+.markdown a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* TOC sidebar — smaller, dimmer */
+.table-of-contents {
+  font-size: 0.82rem;
+}
+
+.table-of-contents__link {
+  color: var(--ifm-font-color-base);
+  opacity: 0.65;
+}
+
+.table-of-contents__link--active,
+.table-of-contents__link:hover {
+  opacity: 1;
+  color: var(--ifm-color-primary);
+}
+
+/* Sidebar — refined */
+.menu__link {
+  font-size: 0.88rem;
+  border-radius: 8px;
+}
+
+.menu__link--active {
+  font-weight: 600;
+}
+
+/* Breadcrumbs — smaller */
+.breadcrumbs {
+  font-size: 0.82rem;
+}
+
+/* Pagination — cleaner */
+.pagination-nav__link {
+  border-radius: 12px;
+  border-color: rgba(120, 166, 255, 0.1);
+}
+
+.pagination-nav__sublabel {
+  font-size: 0.78rem;
+  opacity: 0.6;
+}
+
+.pagination-nav__label {
+  font-size: 0.92rem;
+}

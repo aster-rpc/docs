@@ -1,0 +1,343 @@
+---
+title: Observability
+sidebar_position: 4
+description: Logging, metrics, and tracing for Aster services
+---
+
+# Observability
+
+Aster provides production-grade observability out of the box: structured
+logging, OpenTelemetry metrics and tracing, and request correlation. All
+features are configurable via environment variables or TOML config.
+
+## Logging
+
+### Configuration
+
+| Environment variable | TOML (`aster.toml`) | Values | Default |
+|---------------------|---------------------|--------|---------|
+| `ASTER_LOG_FORMAT` | `[logging] format` | `json`, `text` | `text` |
+| `ASTER_LOG_LEVEL` | `[logging] level` | `debug`, `info`, `warning`, `error` | `info` |
+| `ASTER_LOG_MASK` | `[logging] mask` | `true`, `false` | `true` |
+
+### Text mode (development)
+
+Human-readable, colored output for local development:
+
+```
+14:30:45.123 INFO  server — connection opened [svc=Hello method=sayHello req=abc12345]
+14:30:45.128 DEBUG server — rpc completed [svc=Hello method=sayHello duration_ms=4.2]
+```
+
+### JSON mode (production)
+
+Structured JSON for log aggregation (ELK, Datadog, Splunk, CloudWatch):
+
+```json
+{"ts":"2026-04-06T14:30:45.123Z","level":"info","logger":"aster.server","msg":"connection opened","service":"Hello","method":"sayHello","request_id":"abc12345"}
+{"ts":"2026-04-06T14:30:45.128Z","level":"debug","logger":"aster.server","msg":"rpc completed","service":"Hello","method":"sayHello","request_id":"abc12345","duration_ms":4.2,"status_code":"OK"}
+```
+
+### Standard log fields
+
+Every log entry can include these fields (when available in context):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ts` | string | ISO 8601 timestamp with milliseconds |
+| `level` | string | `debug`, `info`, `warning`, `error` |
+| `logger` | string | Module path (e.g., `aster.server`) |
+| `msg` | string | Human-readable message |
+| `service` | string | RPC service name |
+| `method` | string | RPC method name |
+| `request_id` | string | Correlation ID for the call |
+| `peer` | string | Remote endpoint ID (masked) |
+| `duration_ms` | float | Call duration in milliseconds |
+| `status_code` | string | RPC status (OK, NOT_FOUND, etc.) |
+| `error` | string | Error message (on failure) |
+| `error_type` | string | Exception class name (on failure) |
+
+### Sensitive field masking
+
+When `ASTER_LOG_MASK=true` (default), sensitive values are automatically masked:
+
+- **Secrets** (`secret_key`, `private_key`, `signing_key`, `signature`, `credential_json`) — replaced with `***`
+- **Identifiers** (`root_pubkey`, `endpoint_id`, `node_id`, `contract_id`, `nonce`) — truncated to `abc1234...5678`
+
+Disable masking for debugging with `ASTER_LOG_MASK=false`.
+
+### Request correlation
+
+Every RPC call automatically sets a correlation context (via Python `contextvars`).
+All log messages within the call's async scope include `service`, `method`,
+`request_id`, and `peer` — even from deeply nested code.
+
+## Metrics
+
+### OpenTelemetry integration
+
+Aster provides RED metrics (Rate, Errors, Duration) via the `MetricsInterceptor`:
+
+```python
+from aster import AsterServer
+from aster.interceptors import MetricsInterceptor
+
+server = AsterServer(
+    services=[MyService()],
+    interceptors=[MetricsInterceptor()],
+)
+```
+
+### Metric names
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `aster.rpc.started` | Counter | `service`, `method`, `pattern` | Total RPC calls started |
+| `aster.rpc.completed` | Counter | `service`, `method`, `status` | Total RPC calls completed |
+| `aster.rpc.duration` | Histogram (seconds) | `service`, `method` | Call latency distribution |
+
+The `status` label uses the RPC status code name: `OK`, `NOT_FOUND`,
+`PERMISSION_DENIED`, `INTERNAL`, etc.
+
+### In-memory fallback
+
+When OpenTelemetry is not installed, `MetricsInterceptor` still collects
+in-memory counters accessible via `snapshot()`:
+
+```python
+metrics = MetricsInterceptor()
+# ... after some calls ...
+print(metrics.snapshot())
+# {"started": 100, "succeeded": 95, "failed": 5, "in_flight": 0}
+```
+
+## Tracing
+
+### Distributed tracing with OpenTelemetry
+
+When the OpenTelemetry SDK is installed and configured, `MetricsInterceptor`
+creates a span for each RPC call:
+
+- **Span name:** `{service}/{method}` (e.g., `HelloService/sayHello`)
+- **Span kind:** `SERVER`
+- **Attributes:**
+
+| Attribute | Example |
+|-----------|---------|
+| `rpc.system` | `aster` |
+| `rpc.service` | `HelloService` |
+| `rpc.method` | `sayHello` |
+| `rpc.aster.pattern` | `unary` |
+| `rpc.aster.idempotent` | `false` |
+| `rpc.aster.error_code` | `NOT_FOUND` (on error) |
+
+### Span conventions
+
+Aster follows the [OpenTelemetry RPC semantic conventions](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/).
+The `rpc.system` attribute is always `aster`, distinguishing Aster spans
+from gRPC or other RPC systems in the same trace.
+
+## Kubernetes deployment
+
+### Recommended configuration
+
+```yaml
+# deployment.yaml
+env:
+  - name: ASTER_LOG_FORMAT
+    value: "json"
+  - name: ASTER_LOG_LEVEL
+    value: "info"
+  - name: ASTER_LOG_MASK
+    value: "true"
+```
+
+### Log aggregation
+
+JSON logs are directly parseable by:
+- **Fluentd / Fluent Bit** — no regex needed, direct JSON parsing
+- **Datadog Agent** — auto-detects JSON format
+- **CloudWatch Logs Insights** — query by `service`, `method`, `duration_ms`
+- **Elasticsearch / Kibana** — index on structured fields
+
+### Example queries
+
+**Slow RPCs (Kibana/Elasticsearch):**
+```
+level:info AND duration_ms:>1000
+```
+
+**Error rate by service (CloudWatch Insights):**
+```
+filter level = "error"
+| stats count(*) as errors by service
+```
+
+## Health and readiness endpoints
+
+Aster includes a lightweight HTTP health server for Kubernetes probes and
+load balancer health checks. It runs on a separate port from the QUIC RPC
+endpoint.
+
+### Setup
+
+The health server is **disabled by default** (port 0). Enable it explicitly:
+
+```python
+from aster import AsterServer
+from aster.health import HealthServer
+
+async with AsterServer(services=[...]) as srv:
+    health = HealthServer(srv, port=8080)
+    await health.start()
+    await srv.serve()
+```
+
+Or via environment variable (no code changes needed):
+
+```bash
+ASTER_HEALTH_PORT=8080 python my_service.py
+```
+
+| Environment variable | Default | Description |
+|---------------------|---------|-------------|
+| `ASTER_HEALTH_PORT` | `0` (disabled) | Port for health HTTP server. Set to enable. |
+| `ASTER_HEALTH_HOST` | `127.0.0.1` | Bind address. Set `0.0.0.0` for k8s pod probes. |
+
+:::caution Bind address security
+The default bind address is `127.0.0.1` (localhost only). Only set `0.0.0.0`
+when running in a container with network isolation (e.g., Kubernetes pod).
+The health endpoint exposes operational metrics that should not be publicly accessible.
+:::
+
+### Endpoints
+
+| Endpoint | Success | Failure | Description |
+|----------|---------|---------|-------------|
+| `GET /healthz` | 200 | 503 | Liveness probe — server is running |
+| `GET /readyz` | 200 | 503 | Readiness probe — contracts published, accepting traffic |
+| `GET /metrics` | 200 | — | Full metrics snapshot (JSON) |
+
+### Response examples
+
+**`/healthz`:**
+```json
+{"status": "ok", "uptime_s": 1234.5}
+```
+
+**`/readyz`:**
+```json
+{"status": "ready", "services": 3, "registry": true}
+```
+
+**`/metrics`:**
+```json
+{
+  "health": {"status": "ok", "uptime_s": 1234.5},
+  "ready": {"status": "ready", "services": 3, "registry": true},
+  "connections": {
+    "active_connections": 5,
+    "total_connections": 142,
+    "active_streams": 3,
+    "total_streams": 8901
+  },
+  "admission": {
+    "consumer_admitted": 42,
+    "consumer_denied": 3,
+    "consumer_errors": 0,
+    "producer_admitted": 2,
+    "producer_denied": 0,
+    "producer_errors": 0,
+    "last_admission_ms": 12.3
+  },
+  "rpc": {
+    "started": 8901,
+    "succeeded": 8850,
+    "failed": 51,
+    "in_flight": 0
+  }
+}
+```
+
+### Kubernetes probes
+
+```yaml
+# deployment.yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+```
+
+### Exec probes (no HTTP server)
+
+If you prefer not to run an HTTP server, use exec probes:
+
+```python
+# health_check.py
+from aster.health import check_health, check_ready
+import sys
+sys.exit(0 if check_health(server) else 1)
+```
+
+## Connection and admission metrics
+
+### Connection metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `active_connections` | Gauge | Currently open peer connections |
+| `total_connections` | Counter | Total connections since startup |
+| `active_streams` | Gauge | Currently active RPC streams |
+| `total_streams` | Counter | Total streams since startup |
+
+### Admission metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `consumer_admitted` | Counter | Consumers successfully admitted |
+| `consumer_denied` | Counter | Consumer admission denied |
+| `consumer_errors` | Counter | Consumer admission errors |
+| `producer_admitted` | Counter | Producers successfully admitted |
+| `producer_denied` | Counter | Producer admission denied |
+| `last_admission_ms` | Gauge | Duration of last admission handshake |
+
+## Grafana dashboard
+
+A pre-built Grafana dashboard template is included at `ops/grafana-dashboard.json`.
+Import it into Grafana for instant visibility:
+
+**Panels included:**
+- Request rate (by service and method)
+- Error rate and error percentage gauge
+- Latency percentiles (p50, p95, p99)
+- In-flight requests
+- Active connections
+- Admission decisions over time
+- Request rate by service (bar chart)
+
+**To import:**
+1. In Grafana, go to Dashboards > Import
+2. Upload `ops/grafana-dashboard.json`
+3. Select your Prometheus data source
+4. The dashboard uses OTel metric names (`aster_rpc_started_total`, etc.)
+
+## TOML configuration example
+
+```toml
+# aster.toml
+
+[logging]
+format = "json"
+level = "info"
+mask = true
+```

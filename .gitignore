@@ -42,3 +42,5 @@ out/
 !.gitignore
 _private/
 
+.claude/
+CLAUDE.md

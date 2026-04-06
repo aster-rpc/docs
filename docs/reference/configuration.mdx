@@ -204,6 +204,24 @@ For JSON output, pass `json=True`:
 config.print_config(json=True)
 ```
 
+## Logging and observability
+
+| Field | Env var | TOML | Default | Description |
+|-------|---------|------|---------|-------------|
+| `log_format` | `ASTER_LOG_FORMAT` | `[logging] format` | `"text"` | `"json"` for structured (k8s/ELK) or `"text"` for dev |
+| `log_level` | `ASTER_LOG_LEVEL` | `[logging] level` | `"info"` | `"debug"`, `"info"`, `"warning"`, `"error"` |
+| `log_mask` | `ASTER_LOG_MASK` | `[logging] mask` | `true` | Mask sensitive fields (keys, credentials) in logs |
+
+```toml
+# aster.toml
+[logging]
+format = "json"
+level = "info"
+mask = true
+```
+
+See the [Observability guide](/guides/observability) for full details on structured logging, OTel metrics, and distributed tracing.
+
 ## Dev mode auto-detection
 
 When no explicit `root_pubkey_file` is configured and admission is needed, `AsterConfig` generates an ephemeral root keypair automatically. In this mode:

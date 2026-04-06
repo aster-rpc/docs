@@ -35,8 +35,11 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Guides',
       items: [
+        'guides/services',
         'guides/define-a-service',
         'guides/dial-a-service',
+        'guides/observability',
+        'guides/mcp-integration',
         'guides/port-from-grpc',
       ],
     },
@@ -45,6 +48,8 @@ const sidebars: SidebarsConfig = {
       label: 'Bindings',
       items: [
         'bindings/python/index',
+        'bindings/python/server',
+        'bindings/python/client',
         'bindings/rust/index',
         'bindings/jvm/index',
         'bindings/dotnet/index',

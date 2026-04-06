@@ -1,6 +1,28 @@
 import {themes as prismThemes} from 'prism-react-renderer';
+import rehypePrettyCode from 'rehype-pretty-code';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
+import type {Options as RehypePrettyCodeOptions} from 'rehype-pretty-code';
+
+const prettyCodeOptions: RehypePrettyCodeOptions = {
+  theme: {
+    light: 'github-light',
+    dark: 'github-dark',
+  },
+  keepBackground: false,
+  defaultLang: 'text',
+  onVisitLine(node: {children: unknown[]}) {
+    if (node.children.length === 0) {
+      node.children = [{type: 'text', value: ' '}];
+    }
+  },
+  onVisitHighlightedLine(node: {properties: Record<string, unknown>}) {
+    node.properties['data-highlighted-line'] = '';
+  },
+  onVisitHighlightedChars(node: {properties: Record<string, unknown>}) {
+    node.properties['data-highlighted-chars'] = '';
+  },
+};
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -35,6 +57,10 @@ const config: Config = {
     locales: ['en'],
   },
 
+  plugins: [
+    require('docusaurus-lunr-search'),
+  ],
+
   presets: [
     [
       'classic',
@@ -43,7 +69,10 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           routeBasePath: 'docs',
           editUrl: 'https://github.com/aster-rpc/docs/edit/main/',
-          },
+          beforeDefaultRehypePlugins: [
+            [rehypePrettyCode, prettyCodeOptions],
+          ],
+        },
         blog: false,
         theme: {
           customCss: './src/css/custom.css',
