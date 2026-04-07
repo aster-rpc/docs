@@ -76,6 +76,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Reference',
       items: [
+        'reference/architecture',
         'reference/configuration',
         'reference/cli',
       ],
