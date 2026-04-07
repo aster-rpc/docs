@@ -16,6 +16,7 @@ const sidebars: SidebarsConfig = {
       label: 'Quickstart',
       items: [
         'quickstart/python',
+        'quickstart/typescript',
         'quickstart/first-service',
       ],
     },
@@ -56,11 +57,19 @@ const sidebars: SidebarsConfig = {
             'bindings/python/client',
           ],
         },
+        {
+          type: 'category',
+          label: 'TypeScript',
+          link: { type: 'doc', id: 'bindings/javascript/index' },
+          items: [
+            'bindings/javascript/ts-server',
+            'bindings/javascript/ts-client',
+          ],
+        },
         'bindings/rust/index',
         'bindings/jvm/index',
         'bindings/dotnet/index',
         'bindings/go/index',
-        'bindings/javascript/index',
       ],
     },
     {

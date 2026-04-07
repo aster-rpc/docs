@@ -34,6 +34,28 @@ class TaskResult:
 ```
 
   </TabItem>
+  <TabItem value="typescript" label="TypeScript">
+
+```typescript
+import { WireType } from '@aster-rpc/aster';
+
+@WireType("myapp/TaskRequest")
+class TaskRequest {
+  taskId = "";
+  priority = 0;
+  constructor(init?: Partial<TaskRequest>) { if (init) Object.assign(this, init); }
+}
+
+@WireType("myapp/TaskResult")
+class TaskResult {
+  taskId = "";
+  status = "";
+  output = "";
+  constructor(init?: Partial<TaskResult>) { if (init) Object.assign(this, init); }
+}
+```
+
+  </TabItem>
   <TabItem value="rust" label="Rust">
 
 ```rust
@@ -87,6 +109,25 @@ class TaskService:
 ```
 
   </TabItem>
+  <TabItem value="typescript" label="TypeScript">
+
+```typescript
+import { Service } from '@aster-rpc/aster';
+
+// With options (name is always explicit in TypeScript)
+@Service({ name: "TaskEngine", version: 2 })
+class TaskService {
+  // ...methods
+}
+
+// Minimal — version defaults to 1
+@Service({ name: "TaskEngine" })
+class TaskService {
+  // ...methods
+}
+```
+
+  </TabItem>
   <TabItem value="rust" label="Rust">
 
 ```rust
@@ -105,21 +146,22 @@ class TaskService:
 
 ### Service options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `name` | `str` | Class name | Service name used in the wire protocol and discovery. |
-| `version` | `int` | `1` | Service version. Distinct versions are separate services. |
-| `serialization` | `SerializationMode` or list | `[XLANG]` | Supported serialization modes. |
-| `scoped` | `str` | `"shared"` | `"shared"` for singleton, `"stream"` for per-connection instances. |
-| `interceptors` | `list[type]` | `[]` | Interceptor classes applied to all methods in this service. |
-| `max_concurrent_streams` | `int` or `None` | `None` | Limit on concurrent streams for this service. |
-| `requires` | `CapabilityRequirement` or `None` | `None` | Capability required to call any method on this service. |
+| Option | Python | TypeScript | Default | Description |
+|--------|--------|-----------|---------|-------------|
+| `name` | `str` | `string` | Class name | Service name used in the wire protocol and discovery. |
+| `version` | `int` | `number` | `1` | Service version. Distinct versions are separate services. |
+| `serialization` | `SerializationMode` or list | `SerializationMode[]` | `[XLANG]` | Supported serialization modes. |
+| `scoped` | `str` | `'shared' \| 'stream'` | `"shared"` | `"shared"` for singleton, `"stream"` for per-connection instances. |
+| `requires` | `CapabilityRequirement` | `CapabilityRequirement` | `None` / `undefined` | Capability required to call any method on this service. |
 
 ## RPC methods
 
-### Unary (`@rpc`)
+### Unary (`@rpc` / `@Rpc`)
 
 A unary method takes one request and returns one response:
+
+<LanguageTabs defaultValue="python">
+  <TabItem value="python" label="Python">
 
 ```python
 from aster.decorators import service, rpc
@@ -134,9 +176,32 @@ class TaskService:
 
 `@rpc` supports both bare (`@rpc`) and parameterized (`@rpc(...)`) syntax.
 
-### Server streaming (`@server_stream`)
+  </TabItem>
+  <TabItem value="typescript" label="TypeScript">
+
+```typescript
+import { Service, Rpc } from '@aster-rpc/aster';
+
+@Service({ name: "TaskService" })
+class TaskService {
+  @Rpc()
+  async assignTask(req: TaskRequest): Promise<TaskResult> {
+    return new TaskResult({ taskId: req.taskId, status: "assigned" });
+  }
+}
+```
+
+`@Rpc()` accepts optional `{ timeout, idempotent, requires }` options.
+
+  </TabItem>
+</LanguageTabs>
+
+### Server streaming (`@server_stream` / `@ServerStream`)
 
 The server sends a stream of responses for a single request. The method must be an async generator:
+
+<LanguageTabs defaultValue="python">
+  <TabItem value="python" label="Python">
 
 ```python
 from typing import AsyncIterator
@@ -150,9 +215,30 @@ class TaskService:
             yield TaskUpdate(task_id=task.id, status=task.status)
 ```
 
-### Client streaming (`@client_stream`)
+  </TabItem>
+  <TabItem value="typescript" label="TypeScript">
+
+```typescript
+@Service({ name: "TaskService" })
+class TaskService {
+  @ServerStream()
+  async *watchTasks(req: WatchRequest): AsyncGenerator<TaskUpdate> {
+    for (const task of getPendingTasks()) {
+      yield new TaskUpdate({ taskId: task.id, status: task.status });
+    }
+  }
+}
+```
+
+  </TabItem>
+</LanguageTabs>
+
+### Client streaming (`@client_stream` / `@ClientStream`)
 
 The client sends a stream of requests; the server returns a single response:
+
+<LanguageTabs defaultValue="python">
+  <TabItem value="python" label="Python">
 
 ```python
 @service
@@ -166,9 +252,32 @@ class TaskService:
         return UploadResult(total_bytes=total_bytes)
 ```
 
-### Bidirectional streaming (`@bidi_stream`)
+  </TabItem>
+  <TabItem value="typescript" label="TypeScript">
+
+```typescript
+@Service({ name: "TaskService" })
+class TaskService {
+  @ClientStream()
+  async uploadArtifacts(stream: AsyncIterable<ArtifactChunk>): Promise<UploadResult> {
+    let totalBytes = 0;
+    for await (const chunk of stream) {
+      totalBytes += chunk.data.length;
+    }
+    return new UploadResult({ totalBytes });
+  }
+}
+```
+
+  </TabItem>
+</LanguageTabs>
+
+### Bidirectional streaming (`@bidi_stream` / `@BidiStream`)
 
 Both sides stream concurrently. The method receives an async iterator and yields responses:
+
+<LanguageTabs defaultValue="python">
+  <TabItem value="python" label="Python">
 
 ```python
 @service
@@ -180,6 +289,27 @@ class TaskService:
     ) -> AsyncIterator[ReviewResult]:
         async for item in requests:
             yield ReviewResult(item_id=item.id, approved=True)
+```
+
+  </TabItem>
+  <TabItem value="typescript" label="TypeScript">
+
+```typescript
+@Service({ name: "TaskService" })
+class TaskService {
+  @BidiStream()
+  async *interactiveReview(
+    requests: AsyncIterable<ReviewItem>
+  ): AsyncGenerator<ReviewResult> {
+    for await (const item of requests) {
+      yield new ReviewResult({ itemId: item.id, approved: true });
+    }
+  }
+}
+```
+
+  </TabItem>
+</LanguageTabs>
 ```
 
 ## Method options

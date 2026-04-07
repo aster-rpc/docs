@@ -1,0 +1,145 @@
+---
+id: ts-server
+title: TypeScript Server
+slug: /bindings/typescript/server
+---
+
+# TypeScript Server Reference
+
+## AsterServer
+
+The high-level server wrapper that handles service registration, endpoint creation, and health endpoints.
+
+```typescript
+import { AsterServer } from '@aster-rpc/aster';
+import { HelloService } from './service.js';
+
+const server = new AsterServer({
+  services: [new HelloService()],
+  config: {
+    healthPort: 8080,
+    logFormat: 'json',
+  },
+});
+
+await server.start();
+console.log("Server started");
+```
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `services` | `object[]` | Required | Array of `@Service`-decorated instances |
+| `config` | `Partial<AsterConfig>` | `{}` | Override config values |
+| `interceptors` | `Interceptor[]` | `[]` | Server-side interceptors |
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `start()` | `Promise<void>` | Start the server (create node, publish contracts, start health) |
+| `close()` | `Promise<void>` | Graceful shutdown |
+| `localTransport()` | `LocalTransport` | In-process transport for testing |
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `endpointAddr` | `string \| undefined` | Base64 NodeAddr for clients |
+| `running` | `boolean` | Whether the server is running |
+| `registry` | `ServiceRegistry` | The service registry |
+| `config` | `AsterConfig` | Resolved configuration |
+
+## ServiceRegistry
+
+```typescript
+import { ServiceRegistry, LocalTransport } from '@aster-rpc/aster';
+import { HelloService } from './service.js';
+
+const registry = new ServiceRegistry();
+registry.register(new HelloService());
+
+const transport = new LocalTransport(registry);
+```
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `register(instance)` | `ServiceInfo` | Register a `@Service`-decorated instance |
+| `lookup(name, version?)` | `ServiceInfo \| undefined` | Look up by name and optional version |
+| `lookupMethod(service, method)` | `[ServiceInfo, MethodInfo] \| undefined` | Look up a specific method |
+| `services()` | `IterableIterator<ServiceInfo>` | All registered services |
+| `size` | `number` | Number of registered services |
+
+## Decorators
+
+### @Service
+
+```typescript
+@Service({ name: "Echo", version: 1 })
+class EchoService { ... }
+```
+
+### @Rpc
+
+```typescript
+@Rpc({ timeout: 30, idempotent: true })
+async echo(req: EchoRequest): Promise<EchoResponse> { ... }
+```
+
+### @ServerStream
+
+```typescript
+@ServerStream()
+async *watchItems(req: WatchRequest): AsyncGenerator<ItemUpdate> { ... }
+```
+
+### @ClientStream
+
+```typescript
+@ClientStream()
+async uploadBatch(requests: AsyncIterable<Item>): Promise<BatchResult> { ... }
+```
+
+### @BidiStream
+
+```typescript
+@BidiStream()
+async *chat(requests: AsyncIterable<Message>): AsyncGenerator<Message> { ... }
+```
+
+### @WireType
+
+```typescript
+@WireType("myapp/Invoice")
+class Invoice {
+  amount = 0;
+  currency = "USD";
+  constructor(init?: Partial<Invoice>) { if (init) Object.assign(this, init); }
+}
+```
+
+## Interceptors
+
+All 9 interceptors from the Python binding are available:
+
+```typescript
+import {
+  DeadlineInterceptor,
+  MetricsInterceptor,
+  RetryInterceptor,
+  RateLimitInterceptor,
+  AuthInterceptor,
+  CircuitBreakerInterceptor,
+  CompressionInterceptor,
+  AuditLogInterceptor,
+  CapabilityInterceptor,
+} from '@aster-rpc/aster';
+
+const metrics = new MetricsInterceptor();
+const rateLimit = new RateLimitInterceptor({ globalRps: 1000, perServiceRps: 500 });
+```
+
+See the [Python Server Reference](/docs/bindings/python/server) for detailed interceptor documentation — the TypeScript API mirrors it exactly.

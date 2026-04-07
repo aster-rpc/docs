@@ -46,15 +46,15 @@ This is not "gRPC but faster." It is a fundamentally different model, built for 
 
 ## Language support
 
-Aster is Python-first. The Python implementation is the reference exemplar, and all features are validated there before being ported to other languages.
+The Python implementation is the reference binding. TypeScript is the second binding, sharing the same Rust core and wire protocol.
 
 | Language | Status |
 | --- | --- |
-| Python | Reference implementation (active development) |
-| Rust | Planned (Phase 2) |
-| JVM (Java/Kotlin) | Planned (Phase 3) |
-| .NET (C#/F#) | Planned (Phase 3) |
-| Go | Planned (Phase 4) |
-| JavaScript/TypeScript | Planned (Phase 4) |
+| Python | Reference implementation (active) |
+| TypeScript | Alpha (active — mirrors Python feature set) |
+| Rust | Planned |
+| JVM (Java/Kotlin) | Planned |
+| .NET (C#/F#) | Planned |
+| Go | Planned |
 
 All language implementations share the same wire protocol and produce identical bytes on the wire. A service written in any supported language can interoperate with clients in any other.

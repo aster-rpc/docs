@@ -1,79 +1,124 @@
 ---
 id: index
-title: JavaScript
-slug: /bindings/javascript
+title: TypeScript
+slug: /bindings/typescript
 ---
 
 import BindingBadge from '@site/src/components/BindingBadge';
 
-<BindingBadge label="JavaScript binding" tone="planned" />
+<BindingBadge label="TypeScript binding" tone="alpha" />
 
 ## Status
 
-Planned. Development will begin after the Python binding stabilizes.
+Alpha. The TypeScript binding mirrors the Python binding's feature set using NAPI-RS for the transport layer and pure TypeScript for the RPC framework.
 
-## Timeline
+**Packages:**
+- `@aster-rpc/transport` — NAPI-RS native addon (Iroh P2P transport)
+- `@aster-rpc/aster` — Pure TypeScript RPC framework
 
-The JavaScript binding is expected to follow the core systems-language bindings (Rust, JVM, .NET, Go) in priority.
+**Runtime support:** Node.js 20+, Bun 1.0+, Deno (via Node compat)
+
+## Install
+
+```bash
+# bun (recommended)
+bun add @aster-rpc/aster
+
+# npm
+npm install @aster-rpc/aster
+
+# pnpm
+pnpm add @aster-rpc/aster
+```
+
+The `@aster-rpc/transport` native addon is included as a dependency and auto-selects the correct binary for your platform.
+
+## Quick example
+
+```typescript
+import { Service, Rpc, WireType, AsterServer, createClient, LocalTransport, ServiceRegistry } from '@aster-rpc/aster';
+
+// Define wire types
+@WireType("hello/HelloRequest")
+class HelloRequest {
+  name = "";
+  constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
+}
+
+@WireType("hello/HelloResponse")
+class HelloResponse {
+  message = "";
+  constructor(init?: Partial<HelloResponse>) { if (init) Object.assign(this, init); }
+}
+
+// Define service
+@Service({ name: "Hello", version: 1 })
+class HelloService {
+  @Rpc()
+  async sayHello(req: HelloRequest): Promise<HelloResponse> {
+    return new HelloResponse({ message: `Hello, ${req.name}!` });
+  }
+}
+
+// Create and call
+const registry = new ServiceRegistry();
+registry.register(new HelloService());
+const transport = new LocalTransport(registry);
+
+const client = createClient(HelloService, transport);
+const result = await client.sayHello(new HelloRequest({ name: "TypeScript" }));
+console.log(result.message); // "Hello, TypeScript!"
+```
 
 ## Architecture
 
-Two approaches are under consideration:
-
-### Option A: WASM
-
-Compile the `core` crate to WebAssembly for use in browsers and edge runtimes (Deno, Cloudflare Workers).
-
 ```
-JavaScript / TypeScript application code
+@aster-rpc/aster          Pure TypeScript — decorators, client, server,
+                          interceptors, framing, protocol types
         |
-        v
-@aster/client npm package     Idiomatic JS API: decorators (TC39),
-                              AsyncIterator for streaming, AbortSignal for cancellation
+@aster-rpc/transport      NAPI-RS native addon — IrohNode, QUIC streams,
+        |                  blobs, docs, gossip
         |
-        | wasm-bindgen
-        v
-core.wasm                     Core crate compiled to WASM
+aster_transport_core       Shared Rust crate (same as Python binding)
         |
-        v
-iroh crates (WASM-compatible subset)
+iroh crates                QUIC, blobs, docs, gossip
 ```
 
-WASM provides the broadest reach (browsers, edge, Node.js) but may have limitations around direct UDP access. Browser-based consumers would connect via WebSocket-to-QUIC relay bridges.
+The TypeScript binding uses the same Rust core as the Python binding. Wire-level compatibility is guaranteed — a Python server can serve TypeScript clients and vice versa.
 
-### Option B: N-API (Node.js native addon)
+## Key design decisions
 
-Use N-API to expose the `core` crate as a native Node.js addon, similar to the Python PyO3 approach.
+- **TC39 Stage 3 decorators** (`@Service`, `@Rpc`, `@ServerStream`, etc.) — compiles to standard JS, no runtime decorator support needed.
+- **Proxy-based client stubs** — `createClient(ServiceClass, transport)` returns a typed client with full IDE autocompletion.
+- **AsyncIterator/AsyncGenerator** for all streaming patterns.
+- **Fory XLANG** (`@apache-fory/core`) for cross-language wire compatibility with Python.
+- **NAPI-RS** for the native transport layer — same pattern as SWC, Prisma, Turbo.
 
-```
-JavaScript / TypeScript application code (Node.js)
-        |
-        v
-@aster/client npm package     Idiomatic JS API
-        |
-        | N-API
-        v
-aster.node                    Native addon built from core crate
-        |
-        v
-iroh crates (full functionality)
-```
+## Features
 
-N-API provides full access to the networking stack (including direct UDP) but is limited to Node.js and compatible runtimes.
+All features from the Python binding are available:
 
-### Key design decisions
+| Feature | Status |
+|---------|--------|
+| All 4 streaming patterns (unary, server, client, bidi) | Done |
+| TC39 decorators (@Service, @Rpc, @ServerStream, etc.) | Done |
+| Proxy-based typed client stubs | Done |
+| 9 interceptors (deadline, retry, metrics, rate-limit, etc.) | Done |
+| Contract identity (BLAKE3 hashing) | Done |
+| Session-scoped services (CALL/CANCEL multiplexing) | Done |
+| Structured logging (JSON/text, correlation, masking) | Done |
+| Health endpoints (/healthz, /readyz, /metrics) | Done |
+| Configuration (env vars, TOML) | Done |
+| IrohTransport (QUIC) | Done |
+| LocalTransport (in-process testing) | Done |
 
-- **TypeScript-first** with full type definitions.
-- **TC39 decorators** (Stage 3) for service definitions where available; plain class registration as a fallback.
-- **AsyncIterator** for streaming patterns.
-- **AbortSignal** for cancellation and deadline propagation.
-- **Apache Fory JavaScript** will handle XLANG serialization for wire compatibility.
+## WASM (future)
 
-### Requirements
-
-- Node.js 18+ (for N-API) or any modern browser/edge runtime (for WASM).
-- The native addon or WASM module for the target platform.
+Iroh supports WASM compilation (since v0.33) with all connections routed through relay servers. The `AsterTransport` interface is designed to support a future `IrohWasmTransport` for browser and edge runtimes. Connections remain end-to-end encrypted even via relay.
 
 ## Further reading
 
-- [Cross-Language Interop](/docs/examples/cross-language) for how wire types enable multi-language deployments
+- [TypeScript Quickstart](/docs/quickstart/typescript) — step-by-step guide
+- [TypeScript Server Reference](/docs/bindings/typescript/server) — AsterServer API
+- [TypeScript Client Reference](/docs/bindings/typescript/client) — createClient API
+- [Cross-Language Interop](/docs/examples/cross-language) — Python ↔ TypeScript

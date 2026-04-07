@@ -1,0 +1,132 @@
+---
+id: ts-client
+title: TypeScript Client
+slug: /bindings/typescript/client
+---
+
+# TypeScript Client Reference
+
+## createClient
+
+The primary way to create a typed RPC client. Uses JavaScript `Proxy` for method interception with full TypeScript type inference.
+
+```typescript
+import { createClient, LocalTransport, ServiceRegistry } from '@aster-rpc/aster';
+import { HelloService } from './service.js';
+import { HelloRequest } from './types.js';
+
+const registry = new ServiceRegistry();
+registry.register(new HelloService());
+const transport = new LocalTransport(registry);
+
+const client = createClient(HelloService, transport);
+
+// Full type inference — client.sayHello() has correct parameter and return types
+const result = await client.sayHello(new HelloRequest({ name: "World" }));
+console.log(result.message); // "Hello, World!"
+```
+
+### Signature
+
+```typescript
+function createClient<T extends new (...args: any[]) => any>(
+  serviceClass: T,
+  transport: AsterTransport,
+  options?: ClientOptions,
+): AsterClient<InstanceType<T>>;
+```
+
+### ClientOptions
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `timeout` | `number` | `undefined` | Default timeout in seconds for all calls |
+| `metadata` | `Record<string, string>` | `{}` | Default metadata for all calls |
+
+### Per-call options
+
+Every method accepts an optional `CallOptions` as the last argument:
+
+```typescript
+const result = await client.sayHello(req, {
+  metadata: { 'x-request-id': '123' },
+  deadlineEpochMs: Date.now() + 30_000,
+});
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `metadata` | `Record<string, string>` | Per-call metadata (merged with defaults) |
+| `deadlineEpochMs` | `number` | Absolute deadline as epoch milliseconds |
+| `serializationMode` | `number` | Override serialization mode |
+| `contractId` | `string` | Contract identity for verification |
+| `callId` | `string` | Correlation ID (auto-generated if omitted) |
+
+## Streaming
+
+### Server streaming
+
+```typescript
+// Returns AsyncIterable — use for-await-of
+for await (const item of client.watchItems(req)) {
+  console.log(item);
+}
+```
+
+### Client streaming
+
+```typescript
+// Pass an async generator as the request
+const result = await client.uploadBatch(async function*() {
+  yield new Item({ name: "one" });
+  yield new Item({ name: "two" });
+}());
+```
+
+### Bidirectional streaming
+
+```typescript
+const channel = client.chat();
+await channel.send(new Message({ text: "hello" }));
+await channel.send(new Message({ text: "world" }));
+await channel.close();
+
+for await (const reply of channel) {
+  console.log(reply);
+}
+```
+
+## AsterClientWrapper
+
+The high-level client wrapper for production use:
+
+```typescript
+import { AsterClientWrapper } from '@aster-rpc/aster';
+
+const client = new AsterClientWrapper({
+  transport: myTransport,
+  config: { logFormat: 'json' },
+});
+
+const echo = client.service(HelloService);
+const result = await echo.sayHello(new HelloRequest({ name: "World" }));
+
+await client.close();
+```
+
+## Transport implementations
+
+| Transport | Use case | Package |
+|-----------|----------|---------|
+| `LocalTransport` | Testing (in-process, no network) | `@aster-rpc/aster` |
+| `IrohTransport` | Production (QUIC over Iroh P2P) | `@aster-rpc/aster` |
+
+```typescript
+// Local (testing)
+import { LocalTransport, ServiceRegistry } from '@aster-rpc/aster';
+const transport = new LocalTransport(registry);
+
+// Remote (production) — requires NAPI native addon
+import { IrohTransport } from '@aster-rpc/aster';
+const transport = new IrohTransport(connection, codec);
+```

@@ -4,6 +4,8 @@ title: Serialization
 slug: /concepts/serialization
 ---
 
+import LanguageTabs, {TabItem} from '@site/src/components/LanguageTabs';
+
 Aster uses [Apache Fory](https://fury.apache.org) for serialization. Fory is a high-performance, cross-language serialization framework that operates on native language objects -- no IDL compilation required, no generated code to maintain.
 
 ## Three serialization modes
@@ -43,6 +45,9 @@ Use ROW when:
 
 A service declares its default serialization mode. Individual methods can override it:
 
+<LanguageTabs defaultValue="python">
+  <TabItem value="python" label="Python">
+
 ```python
 from aster import service, rpc, server_stream, SerializationMode
 
@@ -62,7 +67,28 @@ class AnalyticsService:
         ...
 ```
 
-> The example above uses Python, the reference implementation. Other languages will use equivalent idioms.
+  </TabItem>
+  <TabItem value="typescript" label="TypeScript">
+
+```typescript
+import { Service, Rpc, SerializationMode } from '@aster-rpc/aster';
+
+@Service({
+  name: "Analytics",
+  version: 1,
+  serialization: [SerializationMode.XLANG], // service default
+})
+class AnalyticsService {
+  @Rpc() // inherits XLANG from service
+  async submitEvent(req: Event): Promise<Ack> { ... }
+
+  @Rpc({ serialization: SerializationMode.ROW }) // override to ROW
+  async queryMetrics(req: MetricsQuery): Promise<MetricsResult> { ... }
+}
+```
+
+  </TabItem>
+</LanguageTabs>
 
 The wire protocol carries the serialization mode in each stream header. The receiver always knows how to decode the incoming payload.
 
@@ -78,7 +104,10 @@ In XLANG mode, every type must have a canonical wire tag: a string that uniquely
 
 For example: `"myapp.models/TaskAssignment"`, `"aster.agent/StepUpdate"`.
 
-In Python, wire types are registered with a decorator:
+Wire types are registered with a decorator:
+
+<LanguageTabs defaultValue="python">
+  <TabItem value="python" label="Python">
 
 ```python
 from aster import wire_type
@@ -92,7 +121,25 @@ class TaskAssignment:
     payload: bytes
 ```
 
-> Other languages will use equivalent mechanisms -- annotations in Java, attributes in C#, macros in Rust.
+  </TabItem>
+  <TabItem value="typescript" label="TypeScript">
+
+```typescript
+import { WireType } from '@aster-rpc/aster';
+
+@WireType("myapp.models/TaskAssignment")
+class TaskAssignment {
+  taskId = "";
+  agentId = "";
+  payload = new Uint8Array();
+  constructor(init?: Partial<TaskAssignment>) { if (init) Object.assign(this, init); }
+}
+```
+
+  </TabItem>
+</LanguageTabs>
+
+Other languages will use equivalent mechanisms -- annotations in Java, attributes in C#, macros in Rust.
 
 Tags are case-sensitive and must be identical across all language implementations of the same type. The namespace `_aster/*` is reserved for framework-internal types.
 

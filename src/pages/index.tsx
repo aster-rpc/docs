@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Layout from '@theme/Layout';
 import Link from '@docusaurus/Link';
 import CodeBlock from '@theme/CodeBlock';
@@ -45,6 +45,105 @@ function FeatureBlock({
   );
 }
 
+const PYTHON_CODE = `from dataclasses import dataclass
+from aster.decorators import service, rpc
+
+@dataclass
+class HelloRequest:
+    name: str = ""
+
+@dataclass
+class HelloResponse:
+    message: str = ""
+
+@service
+class HelloService:
+    @rpc
+    async def say_hello(self, req: HelloRequest) -> HelloResponse:
+        return HelloResponse(message=f"Hello, {req.name}!")`;
+
+const TYPESCRIPT_CODE = `import { Service, Rpc, WireType } from '@aster-rpc/aster';
+
+@WireType("hello/HelloRequest")
+class HelloRequest {
+  name = "";
+  constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
+}
+
+@WireType("hello/HelloResponse")
+class HelloResponse {
+  message = "";
+  constructor(init?: Partial<HelloResponse>) { if (init) Object.assign(this, init); }
+}
+
+@Service({ name: "Hello", version: 1 })
+class HelloService {
+  @Rpc()
+  async sayHello(req: HelloRequest): Promise<HelloResponse> {
+    return new HelloResponse({ message: \`Hello, \${req.name}!\` });
+  }
+}`;
+
+function CodeFirstFeature() {
+  const [lang, setLang] = useState<'python' | 'typescript'>('python');
+  return (
+    <div className="asterFeature">
+      <div className="asterFeature__text">
+        <span className="asterKicker">Code-first</span>
+        <h3>Define services in code. No .proto files. No generation step.</h3>
+        <div className="asterFeature__body">
+          <p>
+            Decorate a class with <code>@service</code> / <code>@Service</code> and
+            its methods with <code>@rpc</code> / <code>@Rpc</code>. Aster scans the
+            type signatures, generates a content-addressed contract, and handles
+            serialization across languages. Your types are the schema.
+          </p>
+        </div>
+        <Link className="asterFeature__link" to={lang === 'python' ? '/docs/quickstart/python' : '/docs/quickstart/typescript'}>
+          Quickstart &rarr;
+        </Link>
+      </div>
+      <div className="asterFeature__code">
+        <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '0.5rem' }}>
+          <button
+            onClick={() => setLang('python')}
+            style={{
+              padding: '0.25rem 0.75rem',
+              border: 'none',
+              borderRadius: '4px 4px 0 0',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontWeight: lang === 'python' ? 600 : 400,
+              background: lang === 'python' ? 'var(--ifm-color-primary)' : 'var(--ifm-background-surface-color)',
+              color: lang === 'python' ? '#fff' : 'var(--ifm-font-color-base)',
+            }}>
+            Python
+          </button>
+          <button
+            onClick={() => setLang('typescript')}
+            style={{
+              padding: '0.25rem 0.75rem',
+              border: 'none',
+              borderRadius: '4px 4px 0 0',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontWeight: lang === 'typescript' ? 600 : 400,
+              background: lang === 'typescript' ? 'var(--ifm-color-primary)' : 'var(--ifm-background-surface-color)',
+              color: lang === 'typescript' ? '#fff' : 'var(--ifm-font-color-base)',
+            }}>
+            TypeScript
+          </button>
+        </div>
+        <CodeBlock
+          language={lang === 'python' ? 'python' : 'typescript'}
+          title={lang === 'python' ? 'hello_service.py' : 'hello_service.ts'}>
+          {lang === 'python' ? PYTHON_CODE : TYPESCRIPT_CODE}
+        </CodeBlock>
+      </div>
+    </div>
+  );
+}
+
 export default function Home(): JSX.Element {
   return (
     <Layout
@@ -69,6 +168,9 @@ export default function Home(): JSX.Element {
               <Link className="button button--primary button--lg" to="/docs/quickstart/python">
                 Start with Python
               </Link>
+              <Link className="button button--primary button--lg" to="/docs/quickstart/typescript">
+                Start with TypeScript
+              </Link>
               <Link className="button button--secondary button--lg" to="/docs/overview/aster-vs-grpc">
                 Aster vs gRPC
               </Link>
@@ -79,35 +181,7 @@ export default function Home(): JSX.Element {
         {/* ── Code-first services ────────────────────────────────── */}
         <section className="asterSection asterSection--paper">
           <div className="container">
-            <FeatureBlock
-              kicker="Code-first"
-              title="Define services in code. No .proto files. No generation step."
-              code={`from dataclasses import dataclass
-from aster.decorators import service, rpc
-
-@dataclass
-class HelloRequest:
-    name: str = ""
-
-@dataclass
-class HelloResponse:
-    message: str = ""
-
-@service
-class HelloService:
-    @rpc
-    async def say_hello(self, req: HelloRequest) -> HelloResponse:
-        return HelloResponse(message=f"Hello, {req.name}!")`}
-              codeTitle="hello_service.py"
-              link="/docs/quickstart/python"
-              linkLabel="Quickstart"
-            >
-              <p>
-                Decorate a class with <code>@service</code> and its methods with <code>@rpc</code>.
-                Aster scans the type signatures, generates a content-addressed contract, and handles
-                serialization across languages. Your Python dataclasses are the schema.
-              </p>
-            </FeatureBlock>
+            <CodeFirstFeature />
           </div>
         </section>
 
@@ -234,7 +308,10 @@ $ aster mcp <endpoint-addr>
               </p>
               <div className="asterHero__actions" style={{ justifyContent: 'center', marginTop: '1.5rem' }}>
                 <Link className="button button--primary button--lg" to="/docs/quickstart/python">
-                  Start with Python
+                  Python
+                </Link>
+                <Link className="button button--primary button--lg" to="/docs/quickstart/typescript">
+                  TypeScript
                 </Link>
                 <Link className="button button--secondary button--lg" to="/docs/overview/why-aster">
                   Why Aster?
