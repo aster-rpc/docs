@@ -163,7 +163,7 @@ server.wait_for_termination()
 from aster import AsterServer
 
 async with AsterServer(services=[Greeter()]) as srv:
-    print(f"Listening at: {srv.endpoint_addr_b64}")
+    print(f"Listening at: {srv.address}")
     await srv.serve()
 ```
 

@@ -1,6 +1,6 @@
 ---
 id: python
-title: Quickstart (Python)
+title: Python
 slug: /quickstart/python
 sidebar_position: 1
 description: Get a working Aster RPC service running in under two minutes with Python.
@@ -64,7 +64,7 @@ from aster import AsterServer
 
 async def main():
     async with AsterServer(services=[HelloService()]) as srv:
-        print("Producer ready at:", srv.endpoint_addr_b64)
+        print("Producer ready at:", srv.address)
         await srv.serve()
 
 
@@ -120,29 +120,31 @@ In **production**, you use the CLI profile system to manage trust and enroll nod
 
 ```bash
 # Operator's machine (one time):
-aster profile create prod
-aster keygen root --profile prod
-#   -> private key stored in OS keyring, public key saved to profile
+aster keygen root
+#   -> ~/.aster/root.key (private -- keep secret)
+#   -> ~/.aster/root.pub (public -- share with nodes)
 
-# Enroll the producer node:
-aster enroll node --profile prod --role producer --name billing-producer
+# Enroll this node as a producer (hosts the billing service):
+aster enroll node --role producer --name billing-producer
 #   -> generates node key + signs credential -> writes .aster-identity
 
-# Enroll the consumer node (can run on the same or different machine):
-aster enroll node --profile prod --role consumer --name billing-consumer
-#   -> adds a consumer peer entry to .aster-identity
+# Enroll the same node as a consumer (calls other services, e.g. orders):
+aster enroll node --role consumer --name order-consumer
+#   -> adds a consumer peer entry to the same .aster-identity
 ```
+
+Each `aster enroll node` call adds a `[[peers]]` entry to the `.aster-identity` file. A single node can act as both producer and consumer -- for example, a billing service that also calls an order service.
 
 Then deploy the `.aster-identity` file alongside your code:
 
 ```python
 # producer.py -- loads node key + producer credential from .aster-identity
 async with AsterServer(services=[HelloService()], peer="billing-producer") as srv:
-    print(srv.endpoint_addr_b64)
+    print(srv.address)
     await srv.serve()
 
 # consumer.py -- loads consumer credential from .aster-identity
-async with AsterClient(peer="billing-consumer") as c:
+async with AsterClient(peer="order-consumer") as c:
     hello = await c.client(HelloService)
     resp = await hello.say_hello(HelloRequest(name="World"))
 ```
@@ -152,7 +154,9 @@ async with AsterClient(peer="billing-consumer") as c:
 ASTER_ENDPOINT_ADDR=<producer addr> python consumer.py
 ```
 
-You can enroll the same node multiple times (e.g., as a producer in one mesh and a consumer in another) -- each `aster enroll node` call adds a `[[peers]]` entry to the `.aster-identity` file.
+:::note
+For a deeper look at how identity files, peer entries, and multi-role enrollment work, see [Understanding the .aster-identity file](/docs/concepts/identity-file) *(coming soon)*.
+:::
 
 See [Configuration](/docs/reference/configuration) for the full list of environment variables and TOML settings, and [Trust and admission](/docs/concepts/trust-model) for the security model.
 

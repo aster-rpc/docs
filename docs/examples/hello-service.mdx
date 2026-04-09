@@ -52,7 +52,7 @@ from aster import AsterServer
 
 async def main():
     async with AsterServer(services=[HelloService()]) as srv:
-        print(f"Endpoint address: {srv.endpoint_addr_b64}")
+        print(f"Endpoint address: {srv.address}")
         print("Waiting for connections... (Ctrl+C to stop)")
         await srv.serve()
 
@@ -63,7 +63,7 @@ asyncio.run(main())
 
 - `AsterServer(services=[HelloService()])` creates a producer that hosts one service. The server builds an iroh node, registers the `aster/1` ALPN for RPC, and runs the consumer admission ALPN for discovery.
 - `async with` calls `start()` (which creates the QUIC endpoint) and `serve()` (which starts the accept loop). On exit, it calls `close()`.
-- `srv.endpoint_addr_b64` is the base64-encoded `NodeAddr` that consumers need to connect.
+- `srv.address` is the `aster1...` connection address that consumers need to connect.
 
 ## The consumer
 

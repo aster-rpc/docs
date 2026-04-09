@@ -17,7 +17,7 @@ from aster import AsterServer
 from my_services import HelloService
 
 async with AsterServer(services=[HelloService()]) as srv:
-    print(f"Listening at: {srv.endpoint_addr_b64}")
+    print(f"Listening at: {srv.address}")
     await srv.serve()  # blocks until Ctrl+C
 ```
 
@@ -130,7 +130,7 @@ start()
   5. Create the internal Server (RPC dispatcher) bound to the node
 ```
 
-After `start()`, you can read properties like `srv.endpoint_addr_b64` and `srv.services`.
+After `start()`, you can read properties like `srv.address` and `srv.services`.
 
 ### Phase 2: `serve()`
 
@@ -185,7 +185,7 @@ All properties require that `start()` has been called (they raise `RuntimeError`
 ### Identity and addressing
 
 ```python
-srv.endpoint_addr_b64  # Base64-encoded NodeAddr string (one address for everything)
+srv.address  # aster1... connection address (one address for everything)
 srv.root_pubkey        # bytes | None -- the root public key for this deployment
 ```
 
@@ -301,7 +301,7 @@ async def main():
         services=[TaskRunnerService()],
         config=config,
     ) as srv:
-        print(f"TaskRunner v2 serving at {srv.endpoint_addr_b64}")
+        print(f"TaskRunner v2 serving at {srv.address}")
         print(f"Root pubkey: {srv.root_pubkey.hex()}")
         for s in srv.services:
             print(f"  {s.name} contract_id={s.contract_id}")

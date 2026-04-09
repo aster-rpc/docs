@@ -49,7 +49,7 @@ class HelloService:
 async def main():
     # Producer
     async with AsterServer(services=[HelloService()]) as srv:
-        addr = srv.endpoint_addr_b64
+        addr = srv.address
 
         # Consumer
         async with AsterClient(endpoint_addr=addr) as client:
