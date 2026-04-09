@@ -46,13 +46,13 @@ generated stubs are needed.
 The agent sees tools like:
 
 ```
-HelloService:say_hello
+HelloService.say_hello
   - name (string, required)
   - greeting (string, default: "Hello")
 
-FileStore:get (unary)
-FileStore:list (server_stream, returns array)
-FileStore:upload (client_stream, accepts _items array)
+FileStore.get (unary)
+FileStore.list (server_stream, returns array)
+FileStore.upload (client_stream, accepts _items array)
 ```
 
 ## Security model
@@ -84,7 +84,7 @@ class DataService:
     async def delete_record(self, req): ...
 ```
 
-Result: the agent sees `DataService:get_record` but never knows `delete_record` exists.
+Result: the agent sees `DataService.get_record` but never knows `delete_record` exists.
 
 ### Layer 2: Allow/deny patterns
 
@@ -92,10 +92,10 @@ Local glob patterns as a safety net, even if the credential allows more:
 
 ```bash
 # Only expose read methods
-aster mcp <peer> --allow "DataService:get_*" --deny "*:delete_*"
+aster mcp <peer> --allow "DataService.get_*" --deny "*.delete_*"
 
 # Only specific services
-aster mcp <peer> --allow "HelloService:*" --allow "StatusService:*"
+aster mcp <peer> --allow "HelloService.*" --allow "StatusService.*"
 ```
 
 ### Layer 3: Human-in-the-loop
@@ -104,7 +104,7 @@ Require operator approval before executing sensitive calls:
 
 ```bash
 # Confirm every call
-aster mcp <peer> --confirm
+aster mcp <peer> --confirm "*"
 
 # Or just specific patterns
 aster mcp <peer> --confirm "*.write_*" --confirm "*.admin_*"
@@ -125,7 +125,7 @@ Example: calling a server-streaming method:
 
 ```json
 {
-  "name": "Analytics:watchMetrics",
+  "name": "Analytics.watchMetrics",
   "arguments": {
     "interval": 5,
     "_max_items": 10,
@@ -135,16 +135,6 @@ Example: calling a server-streaming method:
 ```
 
 Returns a JSON array of up to 10 items collected over 15 seconds.
-
-## Demo mode
-
-Test the MCP server without a live peer:
-
-```bash
-aster mcp --demo
-```
-
-This uses built-in sample services (HelloWorld, FileStore, Analytics) with simulated responses. Useful for testing AI agent integrations before connecting to real services.
 
 ## Configuration with Claude Code
 
@@ -169,7 +159,7 @@ With credentials:
   "mcpServers": {
     "my-service": {
       "command": "aster",
-      "args": ["mcp", "<endpoint-addr>", "--rcan", "ai-agent.token", "--deny", "*:delete_*"]
+      "args": ["mcp", "<endpoint-addr>", "--rcan", "ai-agent.token", "--deny", "*.delete_*"]
     }
   }
 }
@@ -178,14 +168,13 @@ With credentials:
 ## CLI reference
 
 ```
-aster mcp [peer] [options]
+aster mcp <address> [options]
 
 Arguments:
-  peer                  Peer address (base64 NodeAddr). Omit for --demo mode.
+  address               Peer address (aster1... ticket)
 
 Options:
   --rcan PATH           Enrollment credential for the AI agent
-  --demo                Use demo data (no live peer)
   --allow PATTERN       Glob for allowed tools (repeatable)
   --deny PATTERN        Glob for denied tools (repeatable)
   --confirm PATTERN     Glob for tools requiring human approval (repeatable)
