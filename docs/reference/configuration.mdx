@@ -169,12 +169,11 @@ attributes = {}
 signature = "<hex-encoded signature>"
 ```
 
-`AsterServer` and `AsterClient` auto-detect this file in the current working directory. Use the `peer` parameter or `ASTER_IDENTITY_FILE` to select a specific file or peer entry:
+`AsterServer` and `AsterClient` auto-detect this file in the current working directory. Use `identity=` to point to a specific file, and `peer=` to select a peer entry by name:
 
 ```python
-# Select a specific peer entry by name
-server = AsterServer(services=[...], peer="billing-producer")
-client = AsterClient(peer="analytics-consumer")
+server = AsterServer(services=[...], identity=".aster-identity", peer="billing-producer")
+client = AsterClient(identity=".aster-identity", peer="analytics-consumer")
 ```
 
 ## Debugging configuration

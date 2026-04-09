@@ -283,12 +283,12 @@ Then deploy the `.aster-identity` file alongside your code:
 
 ```python
 # producer.py -- loads node key + producer credential from .aster-identity
-async with AsterServer(services=[HelloService()], peer="hello-producer") as srv:
+async with AsterServer(services=[HelloService()], identity=".aster-identity", peer="hello-producer") as srv:
     print(srv.address)
     await srv.serve()
 
 # consumer.py -- loads consumer credential from .aster-identity
-async with AsterClient(peer="hello-consumer") as c:
+async with AsterClient(identity=".aster-identity", peer="hello-consumer") as c:
     hello = await c.client(HelloService)
     resp = await hello.say_hello(HelloRequest(name="World"))
 ```
@@ -305,7 +305,8 @@ ASTER_ENDPOINT_ADDR=<producer addr> python consumer.py
 // producer.ts -- loads node key + producer credential from .aster-identity
 const server = new AsterServer({
   services: [new HelloService()],
-  config: { peer: "hello-producer" },
+  identity: ".aster-identity",
+  peer: "hello-producer",
 });
 await server.start();
 console.log(server.address);
@@ -313,7 +314,8 @@ await server.serve();
 
 // consumer.ts -- loads consumer credential from .aster-identity
 const client = new AsterClientWrapper({
-  config: { peer: "hello-consumer" },
+  identity: ".aster-identity",
+  peer: "hello-consumer",
   address: process.env.ASTER_ENDPOINT_ADDR!,
 });
 await client.connect();

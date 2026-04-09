@@ -30,7 +30,8 @@ That is a complete producer. The `async with` block calls `start()` (creates the
 AsterServer(
     services=[HelloService(), OtherService()],     # required
     config=AsterConfig(...),                        # optional
-    peer="billing-producer",                       # optional: select from .aster-identity
+    identity=".aster-identity",                    # optional: path to identity file
+    peer="billing-producer",                       # optional: select peer from identity file
     root_pubkey=b'\x01\x02...',                     # optional override
     allow_all_consumers=True,                       # optional override
     allow_all_producers=False,                      # optional override
@@ -68,11 +69,11 @@ Selects a peer entry from the `.aster-identity` file by name. When an `.aster-id
 
 ```python
 # With identity file -- loads node key + root_pubkey from .aster-identity:
-async with AsterServer(services=[MyService()], peer="billing-producer") as srv:
+async with AsterServer(services=[MyService()], identity=".aster-identity", peer="billing-producer") as srv:
     await srv.serve()
 ```
 
-If `peer` is omitted, `AsterServer` auto-selects the first `[[peers]]` entry with `role = "producer"`. If no `.aster-identity` file is found, the node runs in dev mode (ephemeral identity, open gates).
+If `identity` is omitted, `AsterServer` auto-detects `.aster-identity` in the current directory (or the path set by `ASTER_IDENTITY_FILE`). If `peer` is omitted, it auto-selects the first `[[peers]]` entry with `role = "producer"`. If no identity file is found, the node runs in dev mode (ephemeral identity, open gates).
 
 The identity file provides: the node `secret_key` (stable EndpointId), the `root_pubkey` (trust anchor for the mesh), and the signed enrollment credential. You do not need to set `root_pubkey`, `ASTER_SECRET_KEY`, or `ASTER_ROOT_PUBKEY_FILE` separately when using an identity file.
 
@@ -351,7 +352,7 @@ path = "/var/lib/aster"
 
 ```python
 config = AsterConfig.from_file("aster.toml")
-async with AsterServer(services=[...], config=config, peer="billing-producer") as srv:
+async with AsterServer(services=[...], config=config, identity=".aster-identity", peer="billing-producer") as srv:
     ...
 ```
 
