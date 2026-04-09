@@ -4,7 +4,7 @@ title: CLI Reference
 slug: /reference/cli
 ---
 
-The `aster` command-line tool provides offline utilities for managing profiles, enrolling nodes, generating contract manifests, and inspecting configuration. It does not run a server or client -- those are started from Python code using `AsterServer` and `AsterClient`.
+The `aster` command-line tool provides utilities for managing profiles, enrolling nodes, generating contracts, invoking services, and exploring remote peers interactively. Servers are started from Python code using `AsterServer`; the CLI provides the client-side tools for connecting, testing, and generating typed client libraries.
 
 ## Installation
 
@@ -158,6 +158,127 @@ Display the resolved configuration with provenance tracking. Equivalent to calli
 ```bash
 aster config show
 aster config show --json
+```
+
+### `aster call`
+
+Invoke an RPC method on a remote service from the command line. One-shot, non-interactive.
+
+```bash
+aster call <ADDRESS> <SERVICE.METHOD> '<JSON>'
+```
+
+**Example:**
+
+```bash
+aster call aster1Qm... MissionControl.getStatus '{"agent_id": "edge-node-7"}'
+```
+
+Uses the proxy client with JSON serialization mode. No type definitions or codegen needed.
+
+### `aster shell`
+
+Interactive shell for exploring and invoking services on a remote peer.
+
+```bash
+aster shell <ADDRESS>
+```
+
+Provides `cd`, `ls`, `describe`, `./methodName` for navigation and invocation. Tab completion for service names, methods, and arguments.
+
+### `aster contract gen-client`
+
+Generate a typed client library from a running service or exported manifest.
+
+```bash
+# From a live service
+aster contract gen-client aster1Qm... --out ./clients --package my_client
+
+# From an exported manifest
+aster contract gen-client ./Service.aster.json --out ./clients --package my_client
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `SOURCE` | `aster1...` ticket, `.aster.json` file path, or `@handle/Service`. |
+| `--out DIR` | Output directory for generated files. |
+| `--package NAME` | Package/module name. Default: derived from source. |
+| `--lang LANG` | Target language. Default: `python`. |
+
+### `aster contract export`
+
+Export a contract manifest to a portable `.aster.json` file for sharing.
+
+```bash
+aster contract export --manifest .aster/manifest.json -o ./exports/
+```
+
+### `aster contract import`
+
+Import a `.aster.json` file into the local contract store.
+
+```bash
+aster contract import ./TaskManager.aster.json
+```
+
+### `aster contract verify`
+
+Verify an exported `.aster.json` matches the local manifest.
+
+```bash
+aster contract verify ./TaskManager.aster.json
+```
+
+### `aster join`
+
+Claim a handle on the `@aster` registry.
+
+```bash
+aster join --handle myname --email me@example.com
+```
+
+### `aster verify`
+
+Complete email verification for a claimed handle.
+
+```bash
+aster verify --code 123456
+```
+
+### `aster publish`
+
+Publish a service to the `@aster` registry for discovery.
+
+```bash
+aster publish TaskManager
+```
+
+### `aster discover`
+
+Search the `@aster` registry for published services.
+
+```bash
+aster discover task
+```
+
+### `aster access`
+
+Manage access control for published services.
+
+```bash
+aster access grant @alice --service TaskManager --role reader
+aster access revoke @alice --service TaskManager
+aster access list --service TaskManager
+```
+
+### `aster mcp`
+
+Start an MCP (Model Context Protocol) server that exposes Aster services as tools for AI agents.
+
+```bash
+aster mcp <ADDRESS>
 ```
 
 ## Profile system

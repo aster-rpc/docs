@@ -2,8 +2,76 @@ import React, { useState } from 'react';
 import Layout from '@theme/Layout';
 import Link from '@docusaurus/Link';
 import CodeBlock from '@theme/CodeBlock';
+import {
+  siDotnet,
+  siGo,
+  siKotlin,
+  siOpenjdk,
+  siPython,
+  siRust,
+  siTypescript,
+} from 'simple-icons';
 import ConceptCard from '../components/ConceptCard';
 import ArchitectureDiagram from '../components/ArchitectureDiagram';
+
+const HERO_SNIPPETS = [
+  'dial("peer:pubk:9q4m...")',
+  '@service class InvoiceStream',
+  'schema = blake3(service_schema)',
+  '$ aster shell peer://agent.mesh',
+  'resolve credential -> capability',
+  'relay fallback: enabled',
+  'HelloService:say_hello(name="world")',
+  'session-scoped service attached',
+];
+
+const HERO_NODES = [
+  { id: 'client-a', label: 'PY', x: 14, y: 26, size: 'sm' },
+  { id: 'client-b', label: 'TS', x: 20, y: 72, size: 'sm' },
+  { id: 'gateway', label: 'Aster', x: 50, y: 50, size: 'lg' },
+  { id: 'agent', label: 'MCP', x: 78, y: 20, size: 'md' },
+  { id: 'edge', label: 'EDGE', x: 84, y: 64, size: 'md' },
+  { id: 'runtime', label: 'AI', x: 58, y: 84, size: 'sm' },
+];
+
+const HERO_LINKS = [
+  ['client-a', 'gateway'],
+  ['client-b', 'gateway'],
+  ['gateway', 'agent'],
+  ['gateway', 'edge'],
+  ['gateway', 'runtime'],
+  ['agent', 'edge'],
+];
+
+const HERO_METRICS = [
+  { label: 'Identity-first transport', value: 'No hostnames required' },
+  { label: 'Typed schemas', value: 'Content-addressed artifacts' },
+  { label: 'Tooling', value: 'Shell + MCP in one runtime' },
+];
+
+const LANGUAGE_SUPPORT = [
+  { id: 'python', label: 'Python', state: 'alpha', href: '/docs/quickstart/python' },
+  { id: 'typescript', label: 'TypeScript', state: 'alpha', href: '/docs/quickstart/python' },
+  { id: 'rust', label: 'Rust', state: 'planned' },
+  { id: 'golang', label: 'Golang', state: 'planned' },
+  { id: 'java', label: 'Java', state: 'planned' },
+  { id: 'kotlin', label: 'Kotlin', state: 'planned' },
+  { id: 'dotnet', label: '.NET', state: 'planned' },
+] as const;
+
+const LANGUAGE_ICONS = {
+  python: siPython,
+  typescript: siTypescript,
+  rust: siRust,
+  golang: siGo,
+  java: siOpenjdk,
+  kotlin: siKotlin,
+  dotnet: siDotnet,
+} as const;
+
+const POSITION_BY_ID = Object.fromEntries(
+  HERO_NODES.map((node) => [node.id, { x: node.x, y: node.y }]),
+);
 
 function FeatureBlock({
   kicker,
@@ -95,11 +163,11 @@ function CodeFirstFeature() {
           <p>
             Decorate a class with <code>@service</code> / <code>@Service</code> and
             its methods with <code>@rpc</code> / <code>@Rpc</code>. Aster scans the
-            type signatures, generates a content-addressed contract, and handles
-            serialization across languages. Your types are the schema.
+            type signatures, generates a content-addressed service schema, and
+            handles serialization across languages. Your types are the schema.
           </p>
         </div>
-        <Link className="asterFeature__link" to={lang === 'python' ? '/docs/quickstart/python' : '/docs/quickstart/typescript'}>
+        <Link className="asterFeature__link" to={lang === 'python' ? '/docs/quickstart/python' : '/docs/quickstart/python'}>
           Quickstart &rarr;
         </Link>
       </div>
@@ -144,48 +212,217 @@ function CodeFirstFeature() {
   );
 }
 
-export default function Home(): JSX.Element {
+function HeroVisual() {
+  return (
+    <div className="asterHeroVisual" aria-hidden="true">
+      <div className="asterHeroVisual__backdrop" />
+      <div className="asterHeroVisual__beam" />
+
+      <div className="asterCodeRail asterCodeRail--left">
+        {HERO_SNIPPETS.map((snippet, index) => (
+          <span
+            key={`left-${snippet}`}
+            className="asterCodeRail__item"
+            style={{ animationDelay: `${index * 1.2}s` }}>
+            {snippet}
+          </span>
+        ))}
+      </div>
+
+      <div className="asterCodeRail asterCodeRail--right">
+        {[...HERO_SNIPPETS].reverse().map((snippet, index) => (
+          <span
+            key={`right-${snippet}`}
+            className="asterCodeRail__item"
+            style={{ animationDelay: `${index * 1.1}s` }}>
+            {snippet}
+          </span>
+        ))}
+      </div>
+
+      <div className="asterSignalField">
+        <svg
+          className="asterSignalField__grid"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none">
+          {HERO_LINKS.map(([from, to], index) => {
+            const start = POSITION_BY_ID[from];
+            const end = POSITION_BY_ID[to];
+            return (
+              <line
+                key={`${from}-${to}`}
+                className="asterSignalField__link"
+                style={{ animationDelay: `${index * 0.35}s` }}
+                x1={start.x}
+                y1={start.y}
+                x2={end.x}
+                y2={end.y}
+              />
+            );
+          })}
+        </svg>
+
+        {HERO_NODES.map((node, index) => (
+          <div
+            key={node.id}
+            className={`asterSignalNode asterSignalNode--${node.size}`}
+            style={{
+              left: `${node.x}%`,
+              top: `${node.y}%`,
+              animationDelay: `${index * 0.4}s`,
+            }}>
+            <span>{node.label}</span>
+          </div>
+        ))}
+
+        <div className="asterSignalPanel">
+          <span className="asterSignalPanel__label">routing plane</span>
+          <div className="asterSignalPanel__title">Verify peer, load schema, attach service.</div>
+          <div className="asterSignalPanel__meta">
+            <span>nat traversal</span>
+            <span>relay fallback</span>
+            <span>typed tools</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LanguageBadgeIcon({ id }: { id: (typeof LANGUAGE_SUPPORT)[number]['id'] }) {
+  const icon = LANGUAGE_ICONS[id];
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="asterLanguageBadge__iconSvg"
+      aria-hidden="true"
+      style={{ color: `#${icon.hex}` }}>
+      <path d={icon.path} />
+    </svg>
+  );
+}
+
+function LanguageSupportStrip() {
+  return (
+    <section className="asterLanguageSupport">
+      <div className="container">
+        <div className="asterLanguageSupport__intro">
+          <span className="asterKicker">Language support</span>
+          <p>Ship today with Python and TypeScript, with Rust and the next bindings already mapped out.</p>
+        </div>
+
+        <div className="asterLanguageSupport__grid">
+          {LANGUAGE_SUPPORT.map((language) => {
+            const content = (
+              <>
+                <span className={`asterLanguageBadge__icon asterLanguageBadge__icon--${language.id}`}>
+                  <LanguageBadgeIcon id={language.id} />
+                </span>
+                <span className="asterLanguageBadge__copy">
+                  <strong>{language.label}</strong>
+                  <span
+                    className={`asterLanguageBadge__state ${
+                      language.state === 'alpha'
+                        ? 'asterLanguageBadge__state--alpha'
+                        : 'asterLanguageBadge__state--soon'
+                    }`}>
+                    {language.state === 'alpha' ? 'Alpha' : 'Planned'}
+                  </span>
+                </span>
+              </>
+            );
+
+            if ('href' in language && language.href) {
+              return (
+                <Link key={language.id} className="asterLanguageBadge asterLanguageBadge--linked" to={language.href}>
+                  {content}
+                </Link>
+              );
+            }
+
+            return (
+              <div key={language.id} className="asterLanguageBadge">
+                {content}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export default function Home(): React.JSX.Element {
   return (
     <Layout
       title="RPC after hostnames."
-      description="Identity-first connectivity, content-addressed contracts, and cross-language services for real distributed systems.">
+      description="Identity-first connectivity, content-addressed service schemas, and cross-language services for real distributed systems.">
       <main className="asterHome">
-        {/* ── Hero ───────────────────────────────────────────────── */}
         <section className="asterHero">
+          <div className="container asterHero__container">
+            <div className="asterHero__content">
+              <div className="asterEyebrow">IDENTITY-FIRST DISTRIBUTED SYSTEMS SUBSTRATE</div>
+              <h1>Aster</h1>
+              <p className="asterHero__tagline">RPC after hostnames.</p>
+              <p className="asterHero__lead">
+                A transport and typed schema layer for systems that move across peers,
+                runtimes, and trust boundaries before DNS ever helps.
+              </p>
+              <p className="asterHero__sublead">
+                Build services once, dial by identity, and expose typed tools to
+                shells, agents, and cross-language clients without a generation maze.
+              </p>
+              <div className="asterHero__actions">
+                <Link className="button button--primary button--lg" to="/docs/quickstart/python">
+                  Start with Python
+                </Link>
+                <Link className="button button--primary button--lg" to="/docs/quickstart/python">
+                  Start with TypeScript
+                </Link>
+                <Link className="button button--secondary button--lg" to="/docs/overview/aster-vs-grpc">
+                  Aster vs gRPC
+                </Link>
+              </div>
+
+              <div className="asterHero__metrics">
+                {HERO_METRICS.map((metric) => (
+                  <div key={metric.label} className="asterHeroMetric">
+                    <span className="asterHeroMetric__label">{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <HeroVisual />
+          </div>
+        </section>
+
+        <section className="asterProof">
           <div className="container">
-            <div className="asterEyebrow">IDENTITY-FIRST DISTRIBUTED SYSTEMS SUBSTRATE</div>
-            <h1>Aster</h1>
-            <p className="asterHero__tagline">RPC after hostnames.</p>
-            <p className="asterHero__lead">
-              Identity-first connectivity, content-addressed contracts, and
-              cross-language services for real distributed systems.
-            </p>
-            <p className="asterHero__sublead">
-              Built for AI runtimes, edge deployments, and multi-language
-              services that cannot assume static addresses or bolt-on trust.
-            </p>
-            <div className="asterHero__actions">
-              <Link className="button button--primary button--lg" to="/docs/quickstart/python">
-                Start with Python
-              </Link>
-              <Link className="button button--primary button--lg" to="/docs/quickstart/typescript">
-                Start with TypeScript
-              </Link>
-              <Link className="button button--secondary button--lg" to="/docs/overview/aster-vs-grpc">
-                Aster vs gRPC
-              </Link>
+            <div className="asterProof__row">
+              <p>
+                Built for AI runtimes, edge deployments, sovereign meshes, and
+                multi-language services where addresses are unstable but identity
+                and intent still need to hold.
+              </p>
+              <div className="asterProof__links">
+                <Link to="/docs/overview/why-aster">Why Aster</Link>
+                <Link to="/docs/concepts/transport">Transport model</Link>
+                <Link to="/docs/guides/mcp-integration">MCP integration</Link>
+              </div>
             </div>
           </div>
         </section>
 
-        {/* ── Code-first services ────────────────────────────────── */}
+        <LanguageSupportStrip />
+
         <section className="asterSection asterSection--paper">
           <div className="container">
             <CodeFirstFeature />
           </div>
         </section>
 
-        {/* ── Aster Shell ────────────────────────────────────────── */}
         <section className="asterSection">
           <div className="container">
             <FeatureBlock
@@ -211,8 +448,8 @@ producer:/services/HelloService$ ./say_hello name="World"
             >
               <p>
                 The Aster shell connects to any peer and lets you navigate services
-                like a filesystem. Browse methods, inspect contracts, and invoke RPCs
-                interactively &mdash; <strong>no local type definitions needed</strong>.
+                like a filesystem. Browse methods, inspect schemas, and invoke
+                RPCs interactively without pausing to generate or vendor client stubs.
               </p>
               <p>
                 Tab completion, streaming output, session subshells, and
@@ -222,7 +459,6 @@ producer:/services/HelloService$ ./say_hello name="World"
           </div>
         </section>
 
-        {/* ── MCP Integration ────────────────────────────────────── */}
         <section className="asterSection asterSection--paper">
           <div className="container">
             <FeatureBlock
@@ -244,30 +480,33 @@ $ aster mcp <endpoint-addr>
             >
               <p>
                 <code>aster mcp</code> runs an MCP server that exposes your services
-                as tools with full type information. No OpenAPI specs, no REST
-                gateways, no SDK generation &mdash; the contract <em>is</em> the tool definition.
+                as tools with full type information. No OpenAPI mirror, no REST
+                gateway, no SDK assembly line. The service schema <em>is</em> the tool definition.
               </p>
               <p>
-                Three-layer security model: credential-based filtering, allow/deny patterns,
-                and human-in-the-loop confirmation.
+                Layer in credential filters, allow/deny patterns, and human confirmation
+                without splitting your operational surface across another stack.
               </p>
             </FeatureBlock>
           </div>
         </section>
 
-        {/* ── What Aster changes ─────────────────────────────────── */}
         <section className="asterSection">
           <div className="container">
             <div className="asterSection__intro">
               <span className="asterKicker">What Aster changes</span>
-              <h2>Hostname-first RPC no longer matches the systems we actually build.</h2>
+              <h2>Make the transport, typed schema, and tool surface feel like one system.</h2>
+              <p>
+                Aster is strongest when the network is messy, the service graph is
+                alive, and your team refuses to accept a pile of adapters as architecture.
+              </p>
             </div>
             <div className="asterCards">
               <ConceptCard title="Dial by identity" href="/docs/concepts/transport">
                 Connect to verified peers by public key, not hostnames. NAT traversal and relay fallback built in.
               </ConceptCard>
-              <ConceptCard title="Portable contracts" href="/docs/concepts/contract-identity">
-                Interface definitions are content-addressed artifacts with deterministic identity.
+              <ConceptCard title="Portable schemas" href="/docs/concepts/contract-identity">
+                Service schemas are content-addressed artifacts with deterministic identity.
               </ConceptCard>
               <ConceptCard title="Language-native APIs" href="/docs/guides/define-a-service">
                 Keep the developer surface idiomatic. Your types are the schema.
@@ -285,36 +524,44 @@ $ aster mcp <endpoint-addr>
           </div>
         </section>
 
-        {/* ── Architecture ───────────────────────────────────────── */}
         <section className="asterSection asterSection--paper">
           <div className="container">
             <div className="asterSection__intro">
-              <span className="asterKicker">Three layers, one system</span>
-              <h2>Transport, serialization, and contract &mdash; intentionally separable.</h2>
+              <span className="asterKicker">Three layers, one runtime story</span>
+              <h2>Transport, serialization, and schemas are separable in theory and coherent in practice.</h2>
+              <p>
+                You can reason about each layer independently, but the developer experience
+                still feels singular from service definition to peer invocation.
+              </p>
             </div>
             <ArchitectureDiagram />
           </div>
         </section>
 
-        {/* ── CTA ────────────────────────────────────────────────── */}
         <section className="asterSection">
           <div className="container">
-            <div className="asterSection__intro" style={{ textAlign: 'center', maxWidth: '36rem', margin: '0 auto' }}>
-              <span className="asterKicker">Get started</span>
-              <h2>Built for the systems that come after cloud-native defaults.</h2>
-              <p>
-                AI runtimes, edge deployments, sovereign meshes, and multi-language services
-                need a different foundation.
-              </p>
-              <div className="asterHero__actions" style={{ justifyContent: 'center', marginTop: '1.5rem' }}>
+            <div className="asterLaunchpad">
+              <div className="asterLaunchpad__copy">
+                <span className="asterKicker">Get started</span>
+                <h2>Pick a language, define a service, and see the network shape around it.</h2>
+                <p>
+                  The fastest way to feel Aster is to stand up a small service, dial it
+                  from another runtime, and inspect it from the shell or an MCP client.
+                </p>
+              </div>
+
+              <div className="asterLaunchpad__actions">
                 <Link className="button button--primary button--lg" to="/docs/quickstart/python">
-                  Python
+                  Python quickstart
                 </Link>
-                <Link className="button button--primary button--lg" to="/docs/quickstart/typescript">
-                  TypeScript
+                <Link className="button button--primary button--lg" to="/docs/quickstart/python">
+                  TypeScript quickstart
                 </Link>
-                <Link className="button button--secondary button--lg" to="/docs/overview/why-aster">
-                  Why Aster?
+                <Link className="button button--secondary button--lg" to="/docs/guides/define-a-service">
+                  Define a service
+                </Link>
+                <Link className="button button--secondary button--lg" to="/docs/examples/hello-service">
+                  Hello service example
                 </Link>
               </div>
             </div>

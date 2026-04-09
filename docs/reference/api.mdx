@@ -1,0 +1,42 @@
+---
+id: api
+title: API Reference
+slug: /reference/api
+---
+
+## Python
+
+Full API documentation generated from source docstrings.
+
+<a href="/api/python/aster/public.html" target="_blank">Open Python API Reference &rarr;</a>
+
+**Public surface:**
+
+| Symbol | Description |
+|--------|-------------|
+| `AsterServer` | Declarative RPC server |
+| `AsterClient` | Declarative RPC client with proxy support |
+| `@service` | Declare an RPC service class |
+| `@rpc` | Mark a unary RPC method |
+| `@server_stream` | Mark a server-streaming method |
+| `@client_stream` | Mark a client-streaming method |
+| `@bidi_stream` | Mark a bidirectional streaming method |
+| `@wire_type` | Register a dataclass for cross-language serialization |
+| `any_of` / `all_of` | Compose capability requirements (OR / AND) |
+| `RpcError` | Exception raised on RPC failure |
+| `StatusCode` | RPC status code enum (matches gRPC codes 0--16) |
+| `AsterConfig` | Server/client configuration |
+| `CallContext` | Per-call context for interceptors |
+
+## TypeScript
+
+TypeScript API reference coming soon.
+
+| Symbol | Description |
+|--------|-------------|
+| `AsterServer` | RPC server |
+| `AsterClientWrapper` | RPC client with proxy support |
+| `@Service` / `@Rpc` / `@ServerStream` / `@ClientStream` / `@BidiStream` | Decorators |
+| `@WireType` | Type registration |
+| `ProxyClient` | Dynamic proxy client (JSON mode) |
+| `RpcError` / `StatusCode` | Error handling |

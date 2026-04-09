@@ -1,23 +1,36 @@
 ---
 id: python
-title: Python
+title: Quickstart
 slug: /quickstart/python
 sidebar_position: 1
-description: Get a working Aster RPC service running in under two minutes with Python.
+description: Get a working Aster RPC service running in under two minutes.
 ---
 
-import BindingBadge from '@site/src/components/BindingBadge';
-
-<BindingBadge label="Python · first-class" tone="stable" />
+import LanguageTabs, {TabItem} from '@site/src/components/LanguageTabs';
 
 Get a working Aster RPC service running in under two minutes.
 
 ## Prerequisites
 
+<LanguageTabs defaultValue="python">
+<TabItem value="python" label="Python">
+
 - **Python 3.9 -- 3.13** (3.14+ is not yet supported)
 - pip, [uv](https://docs.astral.sh/uv/), or any PEP 517 installer
 
+</TabItem>
+<TabItem value="typescript" label="TypeScript">
+
+- **Node.js 20+** or **Bun 1.0+**
+- TypeScript 5.0+ (decorators require `experimentalDecorators`)
+
+</TabItem>
+</LanguageTabs>
+
 ## Install
+
+<LanguageTabs defaultValue="python">
+<TabItem value="python" label="Python">
 
 ```bash
 pip install aster-rpc
@@ -29,9 +42,26 @@ Or with uv:
 uv pip install aster-rpc
 ```
 
+</TabItem>
+<TabItem value="typescript" label="TypeScript">
+
+```bash
+# bun (recommended)
+bun add @aster-rpc/aster
+
+# or npm
+npm install @aster-rpc/aster
+```
+
+</TabItem>
+</LanguageTabs>
+
 ## Define a service
 
-Create a file called `hello_service.py`:
+<LanguageTabs defaultValue="python">
+<TabItem value="python" label="Python">
+
+Create `hello_service.py`:
 
 ```python
 from dataclasses import dataclass
@@ -55,11 +85,63 @@ class HelloService:
         return HelloResponse(message=f"Hello, {req.name}!")
 ```
 
-That is the entire service definition. Three decorators: `@dataclass` (standard Python), `@service` (marks the class as an Aster service), `@rpc` (marks a method as a callable endpoint). No schema files, no code generation, no base classes.
+Three decorators: `@dataclass` (standard Python), `@service` (marks the class as an Aster service), `@rpc` (marks a method as a callable endpoint). No schema files, no code generation, no base classes.
+
+</TabItem>
+<TabItem value="typescript" label="TypeScript">
+
+Create `types.ts`:
+
+```typescript
+import { WireType } from '@aster-rpc/aster';
+
+@WireType("hello/HelloRequest")
+export class HelloRequest {
+  name = "";
+  constructor(init?: Partial<HelloRequest>) {
+    if (init) Object.assign(this, init);
+  }
+}
+
+@WireType("hello/HelloResponse")
+export class HelloResponse {
+  message = "";
+  constructor(init?: Partial<HelloResponse>) {
+    if (init) Object.assign(this, init);
+  }
+}
+```
+
+Create `service.ts`:
+
+```typescript
+import { Service, Rpc } from '@aster-rpc/aster';
+import { HelloRequest, HelloResponse } from './types.js';
+
+@Service({ name: "HelloService", version: 1 })
+export class HelloService {
+  @Rpc()
+  async sayHello(req: HelloRequest): Promise<HelloResponse> {
+    return new HelloResponse({
+      message: `Hello, ${req.name}!`,
+    });
+  }
+}
+```
+
+Three decorators: `@WireType` (stable wire identity), `@Service` (marks the class), `@Rpc` (marks a method). No schema files, no code generation, no base classes.
+
+</TabItem>
+</LanguageTabs>
 
 ## Run a producer
 
-A producer is the node that hosts the service. Create `producer.py`:
+A producer is the node that hosts the service.
+
+<LanguageTabs defaultValue="python">
+<TabItem value="python" label="Python">
+
+Create `producer.py`:
 
 ```python
 import asyncio
@@ -76,20 +158,46 @@ async def main():
 asyncio.run(main())
 ```
 
-Run it:
-
 ```bash
 python producer.py
 ```
 
-In dev mode (no `ASTER_*` environment variables set), `AsterServer`:
+</TabItem>
+<TabItem value="typescript" label="TypeScript">
+
+Create `producer.ts`:
+
+```typescript
+import { AsterServer } from '@aster-rpc/aster';
+import { HelloService } from './service.js';
+
+const server = new AsterServer({
+  services: [new HelloService()],
+});
+
+await server.start();
+console.log("Producer ready at:", server.address);
+await server.serve();
+```
+
+```bash
+bun run producer.ts
+```
+
+</TabItem>
+</LanguageTabs>
+
+In dev mode (no `ASTER_*` environment variables set), the server:
 
 - Generates an ephemeral root key and node identity (no files needed).
-- Opens the consumer gate (`allow_all_consumers=True`) so consumers can connect without enrollment credentials.
+- Opens the consumer gate so consumers can connect without credentials.
 - Serves RPC, blobs, docs, and gossip on a single endpoint.
-- Prints the endpoint address for consumers to connect to.
+- Prints an `aster1...` address for consumers to connect to.
 
 ## Run a consumer
+
+<LanguageTabs defaultValue="python">
+<TabItem value="python" label="Python">
 
 Create `consumer.py`:
 
@@ -109,7 +217,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Run it, passing the producer's endpoint address:
+Run it, passing the producer's address:
 
 ```bash
 ASTER_ENDPOINT_ADDR=<paste from producer output> python consumer.py
@@ -117,11 +225,41 @@ ASTER_ENDPOINT_ADDR=<paste from producer output> python consumer.py
 
 `AsterClient` reads `ASTER_ENDPOINT_ADDR` from the environment, connects to the producer's admission endpoint (to discover available services), then opens an RPC connection. `c.client(HelloService)` returns a typed client stub -- call methods on it like regular async functions.
 
+</TabItem>
+<TabItem value="typescript" label="TypeScript">
+
+Create `consumer.ts`:
+
+```typescript
+import { AsterClientWrapper } from '@aster-rpc/aster';
+import { HelloService } from './service.js';
+import { HelloRequest } from './types.js';
+
+const client = new AsterClientWrapper({
+  address: process.env.ASTER_ENDPOINT_ADDR!,
+});
+
+await client.connect();
+const hello = await client.proxy("HelloService");
+const resp = await hello.sayHello({ name: "World" });
+console.log(resp.message); // Hello, World!
+await client.close();
+```
+
+Run it, passing the producer's address:
+
+```bash
+ASTER_ENDPOINT_ADDR=<paste from producer output> bun run consumer.ts
+```
+
+</TabItem>
+</LanguageTabs>
+
 ## Dev mode vs production
 
 The quickstart above runs in **dev mode** -- ephemeral keys, open gates, no credential files. Everything works out of the box for local development.
 
-In **production**, you use the CLI profile system to manage trust and enroll nodes:
+In **production**, you use the CLI to manage trust and enroll nodes:
 
 ```bash
 # Operator's machine (one time):
@@ -140,6 +278,9 @@ aster enroll node --role consumer --name hello-consumer
 
 Then deploy the `.aster-identity` file alongside your code:
 
+<LanguageTabs defaultValue="python">
+<TabItem value="python" label="Python">
+
 ```python
 # producer.py -- loads node key + producer credential from .aster-identity
 async with AsterServer(services=[HelloService()], peer="hello-producer") as srv:
@@ -157,7 +298,36 @@ async with AsterClient(peer="hello-consumer") as c:
 ASTER_ENDPOINT_ADDR=<producer addr> python consumer.py
 ```
 
-Here we enroll the same node as both producer and consumer. In practice, producers and consumers are often separate nodes -- see [Understanding the .aster-identity file](/docs/concepts/identity-file) *(coming soon)*.
+</TabItem>
+<TabItem value="typescript" label="TypeScript">
+
+```typescript
+// producer.ts -- loads node key + producer credential from .aster-identity
+const server = new AsterServer({
+  services: [new HelloService()],
+  config: { peer: "hello-producer" },
+});
+await server.start();
+console.log(server.address);
+await server.serve();
+
+// consumer.ts -- loads consumer credential from .aster-identity
+const client = new AsterClientWrapper({
+  config: { peer: "hello-consumer" },
+  address: process.env.ASTER_ENDPOINT_ADDR!,
+});
+await client.connect();
+```
+
+```bash
+# Consumer still needs to know where the producer is:
+ASTER_ENDPOINT_ADDR=<producer addr> bun run consumer.ts
+```
+
+</TabItem>
+</LanguageTabs>
+
+Here we enroll the same node as both producer and consumer. In practice, producers and consumers are often separate nodes -- see *Understanding the .aster-identity file (coming soon)*.
 
 See [Configuration](/docs/reference/configuration) for the full list of environment variables and TOML settings, and [Trust and admission](/docs/concepts/trust-model) for the security model.
 
@@ -166,6 +336,4 @@ See [Configuration](/docs/reference/configuration) for the full list of environm
 - [Defining services and types](/docs/guides/services) -- streaming RPCs, `@wire_type`, contract identity.
 - [Configuration](/docs/reference/configuration) -- `AsterConfig`, TOML files, environment variables.
 - [Trust and admission](/docs/concepts/trust-model) -- root keys, enrollment credentials, the Gate model.
-- [AsterServer](/docs/bindings/python/server) -- blobs, docs, gossip, Gate 0 wiring.
-- [AsterClient](/docs/bindings/python/client) -- admission flow, typed clients, error handling.
 - [Observability](/docs/guides/observability) -- structured logging, OTel metrics, health endpoints.

@@ -38,21 +38,36 @@ Most devices on the internet are behind NATs. Establishing direct connections be
 
 **Path upgrades.** iroh continuously attempts to establish direct connections even when using a relay. If network conditions change and a direct path becomes available, iroh transparently migrates the connection. The application sees no interruption.
 
-## NodeAddr: how to find an endpoint
+## Aster addresses: how to find an endpoint
 
-An `EndpointId` identifies who you want to reach. A `NodeAddr` tells the transport how to find them:
+An `EndpointId` identifies who you want to reach. An **aster address** tells the transport how to find them. Aster uses a compact `aster1...` format that encodes everything needed to connect:
 
 ```
-NodeAddr {
-    endpoint_id: EndpointId       // required: who to connect to
-    relay_url: string?            // optional: relay server URL
-    direct_addresses: [SocketAddr] // optional: known IP:port pairs
-}
+aster14TudWqdmQLgjyczpq19BnP8f4FNF68bp8YBvGa51GFEqi5rnPWYAfhbTVA3SvNXfNeoaQJVTC
 ```
 
-The `endpoint_id` is always required. The other fields are hints. If you provide a relay URL, iroh will use that relay for initial connectivity. If you provide direct addresses, iroh will try them first. If you provide nothing beyond the `EndpointId`, iroh will attempt to discover the endpoint using its configured discovery mechanisms (DNS, distributed hash table, local network discovery).
+This single string encodes:
+- The endpoint's ed25519 public key (EndpointId)
+- A relay server address (for NAT traversal)
+- Direct IP addresses (for LAN connectivity)
 
-In practice, endpoints exchange `NodeAddr` values (or the compact `NodeTicket` encoding) out of band to bootstrap connectivity.
+The address is printed by `AsterServer` on startup and passed to `AsterClient` to connect:
+
+```python
+# Producer
+async with AsterServer(services=[MyService()]) as srv:
+    print(srv.address)  # aster14TudW...
+
+# Consumer
+client = AsterClient(address="aster14TudW...")
+await client.connect()
+```
+
+The `aster1` prefix is a human-readable marker. The rest is base58-encoded binary containing the endpoint identity and network hints. The format is compact (typically 80--120 characters), safe to copy-paste, and contains no secrets.
+
+:::info Internal detail
+Under the hood, the address is decoded into a `NodeAddr` containing the `EndpointId`, optional relay URL, and optional direct socket addresses. The `EndpointId` is always required. The relay URL and direct addresses are hints -- if provided, iroh uses them for initial connectivity. If only the `EndpointId` is available, iroh falls back to discovery mechanisms (DNS, distributed hash table, local network).
+:::
 
 ## ALPN protocol negotiation
 
@@ -60,11 +75,15 @@ QUIC connections use ALPN (Application-Layer Protocol Negotiation) to agree on w
 
 - `aster/1` -- the Aster RPC protocol
 - `iroh-blobs` -- content-addressed blob transfer
+- `iroh-docs` -- CRDT document replication (used for the service registry)
 - `iroh-gossip` -- pub-sub messaging
+- `aster.consumer_admission` -- consumer enrollment (direct credentials)
 - `aster.producer_admission` -- producer enrollment
-- `aster.consumer_admission` -- consumer enrollment
+- `aster.admission` (optional) -- delegated admission via `@aster`-issued enrollment tokens
 
 A single iroh endpoint can serve all of these simultaneously. One connection to a peer can carry RPC calls, blob transfers, and gossip messages, each on separate QUIC streams identified by their ALPN.
+
+The admission ALPNs handle the trust handshake before RPC begins. `aster.consumer_admission` verifies credentials signed by the operator's root key. `aster.admission` verifies tokens issued by the `@aster` registry service -- this is the delegated path used when consumers discover services through `@aster` and receive enrollment tokens via access grants.
 
 ## Unified node
 

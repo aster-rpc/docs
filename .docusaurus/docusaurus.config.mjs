@@ -85,7 +85,7 @@ export default {
     "colorMode": {
       "defaultMode": "dark",
       "respectPrefersColorScheme": false,
-      "disableSwitch": true
+      "disableSwitch": false
     },
     "navbar": {
       "title": "Aster",

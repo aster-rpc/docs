@@ -16,7 +16,6 @@ const sidebars: SidebarsConfig = {
       label: 'Quickstart',
       items: [
         'quickstart/python',
-        'quickstart/typescript',
         'quickstart/first-service',
       ],
     },
@@ -76,6 +75,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Reference',
       items: [
+        'reference/api',
         'reference/architecture',
         'reference/configuration',
         'reference/cli',

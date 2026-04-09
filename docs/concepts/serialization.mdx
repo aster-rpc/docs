@@ -41,6 +41,23 @@ Use ROW when:
 - Partial deserialization improves performance.
 - Columnar data integration is needed.
 
+### JSON (universal fallback)
+
+JSON mode uses UTF-8 JSON for request and response payloads. All frames on a stream -- including the `StreamHeader` and `RpcStatus` trailer -- are JSON objects. Field names use camelCase.
+
+JSON mode exists for language bindings where the Fory XLANG implementation is not yet production-ready (e.g., TypeScript). All Aster servers accept JSON mode alongside their declared Fory modes -- no configuration needed.
+
+Use JSON when:
+- The client is in a language without a mature Fory XLANG implementation.
+- Debugging wire traffic (JSON is human-readable).
+- Building quick prototypes with the proxy client.
+
+Clients that support Fory XLANG should prefer it for performance. JSON mode is a universal fallback, not the primary path.
+
+:::info
+The Python proxy client (`client.proxy("ServiceName")`) uses JSON mode automatically. Generated typed clients use Fory XLANG.
+:::
+
 ## Mode selection
 
 A service declares its default serialization mode. Individual methods can override it:
@@ -92,7 +109,7 @@ class AnalyticsService {
 
 The wire protocol carries the serialization mode in each stream header. The receiver always knows how to decode the incoming payload.
 
-**Cross-language enforcement.** If the client and server are different languages (detected during the connection handshake), only XLANG and ROW are permitted. NATIVE payloads from one language cannot be decoded by another. The framework rejects incompatible mode selections with an error rather than producing corrupt data.
+**Cross-language enforcement.** If the client and server are different languages (detected during the connection handshake), only XLANG, ROW, and JSON are permitted. NATIVE payloads from one language cannot be decoded by another. The framework rejects incompatible mode selections with an error rather than producing corrupt data.
 
 ## Wire type tagging
 

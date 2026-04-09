@@ -33,7 +33,7 @@ The service scope is declared at the service level:
 ```python
 from aster import service, rpc, server_stream, SerializationMode
 
-@service(name="AgentControl", version=1, scoped="stream",
+@service(name="AgentControl", version=1, scoped="session",
          serialization=[SerializationMode.XLANG])
 class AgentControlSession:
 
