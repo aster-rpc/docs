@@ -56,20 +56,6 @@ class TaskResult {
 ```
 
   </TabItem>
-  <TabItem value="rust" label="Rust">
-
-```rust
-// Rust binding planned — wire_type equivalent will use a derive macro.
-```
-
-  </TabItem>
-  <TabItem value="jvm" label="JVM">
-
-```java
-// JVM binding planned — wire_type equivalent will use an annotation.
-```
-
-  </TabItem>
 </LanguageTabs>
 
 The tag string (e.g. `"myapp/TaskRequest"`) is the canonical wire identity. It must be unique within your deployment and stable across releases. The format is `namespace/TypeName`, where the namespace is typically your package or domain.
@@ -125,20 +111,6 @@ class TaskService {
 class TaskService {
   // ...methods
 }
-```
-
-  </TabItem>
-  <TabItem value="rust" label="Rust">
-
-```rust
-// Rust: will use a derive macro, e.g. #[aster::service(name = "TaskEngine")]
-```
-
-  </TabItem>
-  <TabItem value="jvm" label="JVM">
-
-```java
-// JVM: will use annotations, e.g. @AsterService(name = "TaskEngine")
 ```
 
   </TabItem>

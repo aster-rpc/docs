@@ -2,7 +2,7 @@ import React from 'react';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-export type LanguageKey = 'python' | 'rust' | 'jvm' | 'dotnet' | 'go' | 'javascript';
+export type LanguageKey = 'python' | 'typescript';
 
 type Props = {
   children: React.ReactNode;
@@ -12,11 +12,7 @@ type Props = {
 
 const defaultValues: Props['values'] = [
   {value: 'python', label: 'Python'},
-  {value: 'rust', label: 'Rust'},
-  {value: 'jvm', label: 'JVM'},
-  {value: 'dotnet', label: '.NET'},
-  {value: 'go', label: 'Go'},
-  {value: 'javascript', label: 'JavaScript'},
+  {value: 'typescript', label: 'TypeScript'},
 ];
 
 export default function LanguageTabs({children, defaultValue = 'python', values = defaultValues}: Props) {
