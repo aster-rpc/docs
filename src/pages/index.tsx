@@ -43,6 +43,10 @@ const HERO_LINKS = [
   ['agent', 'edge'],
 ];
 
+const POSITION_BY_ID = Object.fromEntries(
+  HERO_NODES.map((node) => [node.id, { x: node.x, y: node.y }]),
+);
+
 const HERO_METRICS = [
   { label: 'Identity-first transport', value: 'No hostnames required' },
   { label: 'Typed schemas', value: 'Content-addressed artifacts' },
@@ -68,10 +72,6 @@ const LANGUAGE_ICONS = {
   kotlin: siKotlin,
   dotnet: siDotnet,
 } as const;
-
-const POSITION_BY_ID = Object.fromEntries(
-  HERO_NODES.map((node) => [node.id, { x: node.x, y: node.y }]),
-);
 
 function FeatureBlock({
   kicker,

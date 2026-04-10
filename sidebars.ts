@@ -17,6 +17,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'quickstart/python',
         'quickstart/first-service',
+        'quickstart/mission-control',
       ],
     },
     {

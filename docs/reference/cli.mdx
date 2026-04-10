@@ -162,7 +162,7 @@ aster config show --json
 
 ### `aster call`
 
-Invoke an RPC method on a remote service from the command line. One-shot, non-interactive.
+Invoke a unary RPC method on a remote service from the command line. One-shot, non-interactive.
 
 ```bash
 aster call <ADDRESS> <SERVICE.METHOD> '<JSON>'
@@ -175,6 +175,13 @@ aster call aster1Qm... MissionControl.getStatus '{"agent_id": "edge-node-7"}'
 ```
 
 Uses the proxy client with JSON serialization mode. No type definitions or codegen needed.
+
+> **Limitations:**
+> - **Shared services only.** Session-scoped services (`scoped="session"`) require a
+>   persistent session connection that `aster call` doesn't establish. Use `aster shell`
+>   or the proxy client for those.
+> - **Unary methods only.** Streaming methods (`server_stream`, `client_stream`,
+>   `bidi_stream`) need the shell or proxy client. `aster call` is request-response.
 
 ### `aster shell`
 
