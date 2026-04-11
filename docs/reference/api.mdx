@@ -4,39 +4,9 @@ title: API Reference
 slug: /reference/api
 ---
 
-## Python
+Full API documentation is generated from source — one curated public surface per language, kept in sync with each release.
 
-Full API documentation generated from source docstrings.
+- **Python** — <a href="/api/python/aster/public.html" target="_blank" rel="noopener">aster-rpc on pdoc &rarr;</a>
+- **TypeScript** — <a href="/api/typescript/" target="_blank" rel="noopener">@aster-rpc/aster on TypeDoc &rarr;</a>
 
-<a href="/api/python/aster/public.html" target="_blank">Open Python API Reference &rarr;</a>
-
-**Public surface:**
-
-| Symbol | Description |
-|--------|-------------|
-| `AsterServer` | Declarative RPC server |
-| `AsterClient` | Declarative RPC client with proxy support |
-| `@service` | Declare an RPC service class |
-| `@rpc` | Mark a unary RPC method |
-| `@server_stream` | Mark a server-streaming method |
-| `@client_stream` | Mark a client-streaming method |
-| `@bidi_stream` | Mark a bidirectional streaming method |
-| `@wire_type` | Register a dataclass for cross-language serialization |
-| `any_of` / `all_of` | Compose capability requirements (OR / AND) |
-| `RpcError` | Exception raised on RPC failure |
-| `StatusCode` | RPC status code enum (matches gRPC codes 0--16) |
-| `AsterConfig` | Server/client configuration |
-| `CallContext` | Per-call context for interceptors |
-
-## TypeScript
-
-TypeScript API reference coming soon.
-
-| Symbol | Description |
-|--------|-------------|
-| `AsterServer` | RPC server |
-| `AsterClientWrapper` | RPC client with proxy support |
-| `@Service` / `@Rpc` / `@ServerStream` / `@ClientStream` / `@BidiStream` | Decorators |
-| `@WireType` | Type registration |
-| `ProxyClient` | Dynamic proxy client (JSON mode) |
-| `RpcError` / `StatusCode` | Error handling |
+Both references are generated from a single curated module per language (`aster.public` for Python, `src/public.ts` for TypeScript) so the surface stays focused and aligned across bindings.
