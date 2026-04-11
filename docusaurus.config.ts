@@ -6,7 +6,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Aster',
-  tagline: 'RPC after hostnames.',
+  tagline: 'Machines authenticate to machines, on behalf of users.',
   favicon: 'img/favicon.ico',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
@@ -85,7 +85,7 @@ const config: Config = {
         {to: '/docs/quickstart/python', label: 'Quickstart', position: 'left'},
         {to: '/docs/concepts/transport', label: 'Concepts', position: 'left'},
         {
-          href: 'https://github.com/aster-rpc',
+          href: 'https://github.com/aster-rpc/aster-rpc',
           label: 'GitHub',
           position: 'right',
         },
@@ -105,7 +105,7 @@ const config: Config = {
         {
           title: 'Project',
           items: [
-            {label: 'GitHub', href: 'https://github.com/aster-rpc'},
+            {label: 'GitHub', href: 'https://github.com/aster-rpc/aster-rpc'},
           ],
         },
       ],

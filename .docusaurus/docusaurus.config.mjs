@@ -5,7 +5,7 @@
  */
 export default {
   "title": "Aster",
-  "tagline": "RPC after hostnames.",
+  "tagline": "Machines authenticate to machines, on behalf of users.",
   "favicon": "img/favicon.ico",
   "future": {
     "v4": {
@@ -116,7 +116,7 @@ export default {
           "position": "left"
         },
         {
-          "href": "https://github.com/aster-rpc",
+          "href": "https://github.com/aster-rpc/aster-rpc",
           "label": "GitHub",
           "position": "right"
         }
@@ -148,7 +148,7 @@ export default {
           "items": [
             {
               "label": "GitHub",
-              "href": "https://github.com/aster-rpc"
+              "href": "https://github.com/aster-rpc/aster-rpc"
             }
           ]
         }

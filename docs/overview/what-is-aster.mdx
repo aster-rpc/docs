@@ -4,13 +4,15 @@ title: What is Aster?
 slug: /overview/what-is-aster
 ---
 
-Aster is an identity-first RPC framework for distributed systems. It replaces the hostname-and-infrastructure model of conventional RPC with cryptographic identity, peer-to-peer transport, and content-addressed service contracts.
+**Aster is a peer-to-peer RPC framework. Machines need to authenticate to other machines, often on behalf of a user, and Aster makes that safe — without a central authority and without shared secrets.**
+
+The 2026 vivid example is AI agents calling tools on remote machines: an agent on machine A wants to invoke a function on machine B, you don't want a hosted proxy in between, you don't want to rotate API keys, and you want the call to be scoped to specific methods. That's exactly what Aster solves. The same engineering also covers IoT fleets, edge compute, multi-tenant microservices, and anything else where the machine is the principal and the user is the delegating authority.
 
 ## The core idea
 
 In traditional RPC, a service call goes to a network address: a hostname, a port, a load balancer. The identity of the thing you are talking to is an afterthought, bolted on via TLS certificates or OAuth tokens.
 
-Aster inverts this. Every endpoint has an ed25519 keypair. The public key *is* the address. When you dial a service, you dial a cryptographic identity -- not a hostname, not an IP address, not a DNS record. The underlying transport resolves that identity to a network path, handles NAT traversal, and establishes an end-to-end encrypted QUIC connection. No infrastructure required.
+Aster inverts this. Every endpoint has an ed25519 keypair. The public key *is* the address. When you dial a service, you dial a cryptographic identity -- not a hostname, not an IP address, not a DNS record. The underlying transport resolves that identity to a network path, handles NAT traversal, and establishes an end-to-end encrypted QUIC connection. No infrastructure required. Identity is in the connection, not bolted on.
 
 ## Three independent layers
 

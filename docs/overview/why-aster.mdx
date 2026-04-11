@@ -4,7 +4,15 @@ title: Why Aster?
 slug: /overview/why-aster
 ---
 
-## The assumptions are breaking down
+## The durable problem
+
+**Machines need to authenticate to other machines, often on behalf of a user.** More code now runs on more machines than people, and the gap is widening. Today the answer to machine-to-machine authentication is API keys, mTLS certificates, IAM roles, service mesh sidecars, or OAuth proxies -- five different mechanisms, none of them designed for machines, all of them bolted onto transport that doesn't care about identity.
+
+Aster's answer is to put identity *in* the connection. Every endpoint has an ed25519 keypair, the QUIC handshake authenticates both sides cryptographically, and a four-gate authorization model enforces capability-based access before your code runs. No shared secrets, no central authority, no OAuth proxy in the middle.
+
+The 2026 vivid example is AI agents: an agent on machine A wants to call a tool on machine B without a hosted proxy, without rotating API keys, with access scoped to specific methods. The same engineering covers IoT fleets, edge compute, multi-tenant microservices, and anything else where the machine is the principal and the user is the delegating authority.
+
+## The cloud-native assumptions are breaking down
 
 gRPC, Thrift, and the broader cloud-native RPC ecosystem were built on a set of assumptions that made sense for data-center services behind load balancers:
 

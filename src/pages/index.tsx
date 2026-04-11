@@ -48,14 +48,15 @@ const POSITION_BY_ID = Object.fromEntries(
 );
 
 const HERO_METRICS = [
-  { label: 'Identity-first transport', value: 'No hostnames required' },
-  { label: 'Typed schemas', value: 'Content-addressed artifacts' },
-  { label: 'Tooling', value: 'Shell + MCP in one runtime' },
+  { label: 'iroh', value: 'QUIC + NAT traversal' },
+  { label: 'Apache Fory', value: 'Cross-language wire format' },
+  { label: 'BLAKE3', value: 'Content-addressed contracts' },
+  { label: 'Four-gate auth', value: 'Offline root key' },
 ];
 
 const LANGUAGE_SUPPORT = [
-  { id: 'python', label: 'Python', state: 'shipping', href: '/docs/quickstart/python' },
-  { id: 'typescript', label: 'TypeScript', state: 'shipping', href: '/docs/quickstart/python' },
+  { id: 'python', label: 'Python', state: 'shipping', href: '/docs/bindings/python' },
+  { id: 'typescript', label: 'TypeScript', state: 'shipping', href: '/docs/bindings/typescript' },
   { id: 'golang', label: 'Go', state: 'in-progress' },
   { id: 'java', label: 'Java', state: 'in-progress' },
   { id: 'kotlin', label: 'Kotlin', state: 'in-progress' },
@@ -361,32 +362,32 @@ function LanguageSupportStrip() {
 export default function Home(): React.JSX.Element {
   return (
     <Layout
-      title="RPC after hostnames."
-      description="Identity-first connectivity, content-addressed service schemas, and cross-language services for real distributed systems.">
+      title="Machines authenticate to machines, on behalf of users."
+      description="Peer-to-peer RPC framework with identity in the connection. Capability-based auth, cross-language wire format, built on iroh QUIC.">
       <main className="asterHome">
         <section className="asterHero">
           <div className="container asterHero__container">
             <div className="asterHero__content">
-              <div className="asterEyebrow">IDENTITY-FIRST DISTRIBUTED SYSTEMS SUBSTRATE</div>
+              <div className="asterEyebrow">PEER-TO-PEER RPC FRAMEWORK</div>
               <h1>Aster</h1>
-              <p className="asterHero__tagline">RPC after hostnames.</p>
+              <p className="asterHero__tagline">Machines authenticate to machines, on behalf of users.</p>
               <p className="asterHero__lead">
-                A transport and typed schema layer for systems that move across peers,
-                runtimes, and trust boundaries before DNS ever helps.
+                Safely &mdash; without a central authority and without shared secrets.
+                No DNS, no load balancer, no certificate authority, no OAuth proxy
+                in the middle. Identity is in the connection, not bolted on.
               </p>
               <p className="asterHero__sublead">
-                Build services once, dial by identity, and expose typed tools to
-                shells, agents, and cross-language clients without a generation maze.
+                The 2026 example: AI agents calling tools on remote machines without
+                a hosted proxy or shared secrets. The same engineering covers IoT
+                fleets, edge compute, and multi-tenant microservices &mdash; anywhere
+                a machine is the principal and the user is the delegating authority.
               </p>
               <div className="asterHero__actions">
-                <Link className="button button--primary button--lg" to="/docs/quickstart/python">
-                  Start with Python
+                <Link className="button button--primary button--lg" to="/docs/quickstart/mission-control">
+                  Build Mission Control
                 </Link>
-                <Link className="button button--primary button--lg" to="/docs/quickstart/python">
-                  Start with TypeScript
-                </Link>
-                <Link className="button button--secondary button--lg" to="/docs/overview/aster-vs-grpc">
-                  Aster vs gRPC
+                <Link className="button button--secondary button--lg" to="/docs/quickstart/python">
+                  Try it in 60 seconds
                 </Link>
               </div>
 
@@ -413,8 +414,8 @@ export default function Home(): React.JSX.Element {
                 and intent still need to hold.
               </p>
               <div className="asterProof__links">
+                <Link to="/docs/quickstart/mission-control">Mission Control walkthrough</Link>
                 <Link to="/docs/overview/why-aster">Why Aster</Link>
-                <Link to="/docs/concepts/transport">Transport model</Link>
                 <Link to="/docs/guides/mcp-integration">MCP integration</Link>
               </div>
             </div>
@@ -468,7 +469,7 @@ producer:/services/HelloService$ ./say_hello name="World"
         <section className="asterSection asterSection--paper">
           <div className="container">
             <FeatureBlock
-              kicker="AI-native"
+              kicker="MCP integration"
               title="Connect any AI agent to your services in one command."
               code={`# Expose your service to Claude or any MCP-compatible agent
 $ aster mcp <endpoint-addr>
@@ -557,17 +558,17 @@ $ aster mcp <endpoint-addr>
               </div>
 
               <div className="asterLaunchpad__actions">
-                <Link className="button button--primary button--lg" to="/docs/quickstart/python">
-                  Python quickstart
+                <Link className="button button--primary button--lg" to="/docs/quickstart/mission-control">
+                  Build Mission Control
                 </Link>
                 <Link className="button button--primary button--lg" to="/docs/quickstart/python">
-                  TypeScript quickstart
+                  60-second quickstart
                 </Link>
                 <Link className="button button--secondary button--lg" to="/docs/guides/define-a-service">
                   Define a service
                 </Link>
-                <Link className="button button--secondary button--lg" to="/docs/examples/hello-service">
-                  Hello service example
+                <Link className="button button--secondary button--lg" to="/docs/overview/aster-vs-grpc">
+                  Aster vs gRPC
                 </Link>
               </div>
             </div>
