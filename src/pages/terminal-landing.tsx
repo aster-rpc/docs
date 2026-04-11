@@ -13,8 +13,8 @@ import {
 import TerminalCastDemo from '../components/TerminalCastDemo';
 
 const LANGUAGE_SUPPORT = [
-  { id: 'python', label: 'Python', state: 'alpha', href: '/docs/quickstart/python' },
-  { id: 'typescript', label: 'TypeScript', state: 'alpha', href: '/docs/quickstart/python' },
+  { id: 'python', label: 'Python', state: 'shipping', href: '/docs/quickstart/python' },
+  { id: 'typescript', label: 'TypeScript', state: 'shipping', href: '/docs/quickstart/python' },
   { id: 'rust', label: 'Rust', state: 'planned' },
   { id: 'golang', label: 'Golang', state: 'planned' },
   { id: 'java', label: 'Java', state: 'planned' },
@@ -58,11 +58,11 @@ function LanguageSupportMini() {
               <strong>{language.label}</strong>
               <span
                 className={`asterLanguageBadge__state ${
-                  language.state === 'alpha'
-                    ? 'asterLanguageBadge__state--alpha'
+                  language.state === 'shipping'
+                    ? 'asterLanguageBadge__state--shipping'
                     : 'asterLanguageBadge__state--soon'
                 }`}>
-                {language.state === 'alpha' ? 'Alpha' : 'Planned'}
+                {language.state === 'shipping' ? 'Shipping 0.1.2' : 'Planned'}
               </span>
             </span>
           </>

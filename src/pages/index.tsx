@@ -54,8 +54,8 @@ const HERO_METRICS = [
 ];
 
 const LANGUAGE_SUPPORT = [
-  { id: 'python', label: 'Python', state: 'alpha', href: '/docs/quickstart/python' },
-  { id: 'typescript', label: 'TypeScript', state: 'alpha', href: '/docs/quickstart/python' },
+  { id: 'python', label: 'Python', state: 'shipping', href: '/docs/quickstart/python' },
+  { id: 'typescript', label: 'TypeScript', state: 'shipping', href: '/docs/quickstart/python' },
   { id: 'golang', label: 'Go', state: 'in-progress' },
   { id: 'java', label: 'Java', state: 'in-progress' },
   { id: 'kotlin', label: 'Kotlin', state: 'in-progress' },
@@ -308,7 +308,7 @@ function LanguageSupportStrip() {
       <div className="container">
         <div className="asterLanguageSupport__intro">
           <span className="asterKicker">Language support</span>
-          <p>Python and TypeScript are first-class alpha bindings. Go, Java, Kotlin, and .NET are in progress. Rust is planned.</p>
+          <p>Python and TypeScript are shipping 0.1.2 as first-class bindings. Go, Java, Kotlin, and .NET are in progress. Rust is planned.</p>
         </div>
 
         <div className="asterLanguageSupport__grid">
@@ -322,14 +322,14 @@ function LanguageSupportStrip() {
                   <strong>{language.label}</strong>
                   <span
                     className={`asterLanguageBadge__state ${
-                      language.state === 'alpha'
-                        ? 'asterLanguageBadge__state--alpha'
+                      language.state === 'shipping'
+                        ? 'asterLanguageBadge__state--shipping'
                         : language.state === 'in-progress'
                           ? 'asterLanguageBadge__state--progress'
                           : 'asterLanguageBadge__state--soon'
                     }`}>
-                    {language.state === 'alpha'
-                      ? 'Alpha'
+                    {language.state === 'shipping'
+                      ? 'Shipping 0.1.2'
                       : language.state === 'in-progress'
                         ? 'In progress'
                         : 'Planned'}
