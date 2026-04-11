@@ -66,8 +66,7 @@ class GreeterImpl(GreeterServicer):
 from dataclasses import dataclass
 from typing import AsyncIterator
 
-from aster.codec import wire_type
-from aster.decorators import service, rpc, server_stream
+from aster import service, rpc, server_stream, wire_type
 
 @wire_type("myapp/HelloRequest")
 @dataclass
@@ -186,7 +185,7 @@ print(response.message)
 ```python
 from aster import AsterClient
 
-async with AsterClient(endpoint_addr="<base64 NodeAddr>") as client:
+async with AsterClient(address="aster1...") as client:
     greeter = await client.client(Greeter)
     resp = await greeter.say_hello(HelloRequest(name="World"))
     print(resp.message)

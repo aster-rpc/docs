@@ -18,7 +18,7 @@ Cross-language interop is built on `@wire_type` tags. When a Python producer ser
 
 ```python
 # Python producer
-from aster.codec import wire_type
+from aster import wire_type
 from dataclasses import dataclass
 
 @wire_type("myapp/TaskRequest")
@@ -46,7 +46,7 @@ The manifest contains the `contract_id` for each service version. Consumers can 
 Cross-language interop requires `SerializationMode.XLANG` (the default). This mode uses Apache Fory's cross-language serialization, which encodes type tags and field schemas in the wire format.
 
 ```python
-from aster.types import SerializationMode
+from aster import service, SerializationMode
 
 # XLANG is the default -- this is equivalent to @service
 @service(serialization=[SerializationMode.XLANG])
@@ -54,7 +54,7 @@ class TaskService:
     ...
 ```
 
-`NATIVE` mode uses Python-specific Fory serialization and cannot be deserialized by other languages. `ROW` mode is language-agnostic in principle but requires that all languages support Fory's row format.
+`NATIVE` mode uses language-native Fory serialization and cannot be deserialized by other languages -- use it for deployments where interoperability is second to performance. `JSON` mode is human-readable on the wire; it is language-agnostic but not optimized for throughput, so reach for it when you want debuggable traffic or proxy-client compatibility.
 
 ## Example: Python producer, future Java consumer
 
@@ -64,8 +64,7 @@ class TaskService:
 from dataclasses import dataclass
 from typing import AsyncIterator
 
-from aster.codec import wire_type
-from aster.decorators import service, rpc, server_stream
+from aster import service, rpc, server_stream, wire_type
 
 @wire_type("billing/Invoice")
 @dataclass
@@ -156,13 +155,14 @@ For two types to be wire-compatible across languages:
 
 | Language | Status | Notes |
 |----------|--------|-------|
-| Python | Reference implementation | Production-ready for 0.1-alpha. |
+| Python | Alpha (first-class) | Production-ready for 0.1-alpha. |
+| TypeScript | Alpha (first-class) | Uses the same Rust core and wire protocol. |
+| Java | In progress | Via C FFI + Panama Foreign Function API (JDK 22+). |
+| .NET | In progress | Via C FFI + P/Invoke or NativeAOT. |
+| Kotlin | In progress | JVM binding surface with Kotlin-first ergonomics. |
+| Go | In progress | Via C FFI + cgo. |
 | Rust | Planned | Direct access to core crate. No FFI overhead. |
-| JVM | Planned | Via C FFI + Panama Foreign Function API (JDK 22+). |
-| Go | Planned | Via C FFI + cgo. |
-| .NET | Planned | Via C FFI + P/Invoke or NativeAOT. |
-| JavaScript | Planned | Via WASM or N-API. |
 
-The Python binding defines the reference behavior. Other bindings will be validated against Python's wire output and contract identity computation to ensure interop.
+All bindings are validated against shared wire output and contract identity test vectors to ensure interop.
 
 See the [Bindings](/docs/bindings/python) section for per-language status and architecture details.

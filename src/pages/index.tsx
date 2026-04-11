@@ -56,11 +56,11 @@ const HERO_METRICS = [
 const LANGUAGE_SUPPORT = [
   { id: 'python', label: 'Python', state: 'alpha', href: '/docs/quickstart/python' },
   { id: 'typescript', label: 'TypeScript', state: 'alpha', href: '/docs/quickstart/python' },
+  { id: 'golang', label: 'Go', state: 'in-progress' },
+  { id: 'java', label: 'Java', state: 'in-progress' },
+  { id: 'kotlin', label: 'Kotlin', state: 'in-progress' },
+  { id: 'dotnet', label: '.NET', state: 'in-progress' },
   { id: 'rust', label: 'Rust', state: 'planned' },
-  { id: 'golang', label: 'Golang', state: 'planned' },
-  { id: 'java', label: 'Java', state: 'planned' },
-  { id: 'kotlin', label: 'Kotlin', state: 'planned' },
-  { id: 'dotnet', label: '.NET', state: 'planned' },
 ] as const;
 
 const LANGUAGE_ICONS = {
@@ -308,7 +308,7 @@ function LanguageSupportStrip() {
       <div className="container">
         <div className="asterLanguageSupport__intro">
           <span className="asterKicker">Language support</span>
-          <p>Ship today with Python and TypeScript, with Rust and the next bindings already mapped out.</p>
+          <p>Python and TypeScript are first-class alpha bindings. Go, Java, Kotlin, and .NET are in progress. Rust is planned.</p>
         </div>
 
         <div className="asterLanguageSupport__grid">
@@ -324,9 +324,15 @@ function LanguageSupportStrip() {
                     className={`asterLanguageBadge__state ${
                       language.state === 'alpha'
                         ? 'asterLanguageBadge__state--alpha'
-                        : 'asterLanguageBadge__state--soon'
+                        : language.state === 'in-progress'
+                          ? 'asterLanguageBadge__state--progress'
+                          : 'asterLanguageBadge__state--soon'
                     }`}>
-                    {language.state === 'alpha' ? 'Alpha' : 'Planned'}
+                    {language.state === 'alpha'
+                      ? 'Alpha'
+                      : language.state === 'in-progress'
+                        ? 'In progress'
+                        : 'Planned'}
                   </span>
                 </span>
               </>

@@ -1769,6 +1769,11 @@ html[data-theme='light'] .asterHeroMetric strong {
   color: var(--aster-teal);
 }
 
+.asterLanguageBadge__state--progress {
+  background: rgba(120, 166, 255, 0.12);
+  color: var(--aster-blue);
+}
+
 .asterLanguageBadge__state--soon {
   background: rgba(230, 192, 107, 0.12);
   color: var(--aster-gold);

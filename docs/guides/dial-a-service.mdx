@@ -26,7 +26,7 @@ from aster import AsterClient
 from my_services import HelloService, HelloRequest
 
 async def main():
-    async with AsterClient(endpoint_addr="<base64 NodeAddr>") as c:
+    async with AsterClient(address="aster1...") as c:
         hello = await c.client(HelloService)
         resp = await hello.say_hello(HelloRequest(name="World"))
         print(resp.message)  # Hello, World!

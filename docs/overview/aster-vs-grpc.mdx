@@ -13,7 +13,7 @@ Aster is not a drop-in replacement for gRPC. The two frameworks are built on dif
 | **Transport** | HTTP/2 over TCP | QUIC over UDP |
 | **Identity** | TLS certificates (hostname-bound) | ed25519 public key (`EndpointId`) |
 | **Connection target** | hostname:port | Cryptographic public key |
-| **Serialization** | Protocol Buffers | Apache Fory (XLANG, NATIVE, ROW modes) with JSON fallback |
+| **Serialization** | Protocol Buffers | Apache Fory (XLANG, NATIVE, ROW modes) with JSON escape hatch for debugging |
 | **Service definition** | `.proto` files + code generation | Language-native decorators/annotations |
 | **Infrastructure** | Load balancers, service mesh, DNS, certificate authorities | Peer-to-peer; no mandatory infrastructure |
 | **NAT traversal** | None (requires routable addresses) | Built-in hole-punching + relay fallback |

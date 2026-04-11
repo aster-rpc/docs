@@ -13,7 +13,7 @@ Create `hello_service.py` with the shared type and service definitions:
 ```python
 # hello_service.py
 from dataclasses import dataclass
-from aster.decorators import service, rpc
+from aster import service, rpc
 
 @dataclass
 class HelloRequest:
@@ -76,7 +76,7 @@ from hello_service import HelloService, HelloRequest
 from aster import AsterClient
 
 async def main():
-    async with AsterClient(endpoint_addr="<paste address from producer>") as client:
+    async with AsterClient(address="<paste address from producer>") as client:
         hello = await client.client(HelloService)
         resp = await hello.say_hello(HelloRequest(name="World"))
         print(resp.message)
@@ -86,7 +86,7 @@ asyncio.run(main())
 
 **Line by line:**
 
-- `AsterClient(endpoint_addr=...)` takes the base64 address printed by the producer. Alternatively, set `ASTER_ENDPOINT_ADDR` as an environment variable and omit the argument.
+- `AsterClient(address=...)` takes the `aster1...` address printed by the producer. Alternatively, set `ASTER_ENDPOINT_ADDR` as an environment variable and omit the argument.
 - `async with` calls `connect()`, which creates a QUIC endpoint and runs the admission handshake to discover available services.
 - `client.client(HelloService)` returns a typed stub. The stub's `say_hello` method serializes the request, sends it over QUIC, deserializes the response, and returns it.
 
@@ -97,7 +97,7 @@ Open two terminals. No credentials or configuration files are needed.
 **Terminal 1 -- producer:**
 
 ```bash
-pip install aster-python
+pip install aster-rpc
 python producer.py
 ```
 

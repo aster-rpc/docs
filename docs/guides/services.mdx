@@ -17,7 +17,7 @@ This guide covers everything you need to define Aster RPC services: the `@servic
 Three calling forms are supported:
 
 ```python
-from aster.decorators import service
+from aster import service
 
 # Bare -- service name defaults to the class name ("Greeter").
 @service
@@ -30,7 +30,7 @@ class AgentControlService:
     ...
 
 # Keyword arguments -- name still defaults to the class name.
-@service(version=2, scoped="stream")
+@service(version=2, scoped="session")
 class ChatSession:
     def __init__(self, peer: str):
         self.peer = peer
@@ -44,7 +44,7 @@ class ChatSession:
 | `name` (positional) | `str` | Class name | The service name used on the wire and in service discovery. |
 | `version` | `int` | `1` | Service version. Consumers specify which version they want. |
 | `serialization` | `SerializationMode` or `list[SerializationMode]` | `[XLANG]` | Which serialization modes this service supports. |
-| `scoped` | `str` | `"shared"` | `"shared"` (one instance serves all connections) or `"stream"` (a new instance is created per session -- the class `__init__` must accept a `peer` parameter). |
+| `scoped` | `str` | `"shared"` | `"shared"` (one instance serves all connections) or `"session"` (a new instance is created per connection -- the class `__init__` must accept a `peer` parameter). |
 | `interceptors` | `list[type]` | `[]` | Interceptor classes applied to every method in the service. |
 | `max_concurrent_streams` | `int` or `None` | `None` | Limits concurrent streams per connection. `None` means unlimited. |
 
@@ -53,7 +53,7 @@ class ChatSession:
 `@rpc` marks a method as a unary RPC (one request in, one response out). It is the most common pattern.
 
 ```python
-from aster.decorators import service, rpc
+from aster import service, rpc
 
 @service
 class Calculator:
@@ -88,7 +88,7 @@ The server sends multiple responses for one request. The method must be an async
 
 ```python
 from typing import AsyncIterator
-from aster.decorators import service, server_stream
+from aster import service, server_stream
 
 
 @service
@@ -114,7 +114,7 @@ The client sends multiple requests; the server returns one response. The method 
 
 ```python
 from typing import AsyncIterator
-from aster.decorators import service, client_stream
+from aster import service, client_stream
 
 
 @service
@@ -133,7 +133,7 @@ Both sides stream concurrently. The method is an async generator that receives a
 
 ```python
 from typing import AsyncIterator
-from aster.decorators import service, bidi_stream
+from aster import service, bidi_stream
 
 
 @service
@@ -197,7 +197,7 @@ Aster supports all types that Apache Fory can serialize:
 - Collections: `list[T]`, `dict[K, V]`, `set[T]`
 - Optional: `T | None` or `Optional[T]`
 - Nested dataclasses
-- Enums (via `IntEnum`)
+- Enums: any `enum.Enum` subclass (including `IntEnum` and `StrEnum`)
 
 All fields should have default values so that deserialization can construct partial objects.
 
@@ -209,7 +209,7 @@ For production services, use `@wire_type` to declare an explicit, stable tag:
 
 ```python
 from dataclasses import dataclass
-from aster.codec import wire_type
+from aster import wire_type
 
 
 @wire_type("hello/HelloRequest")
@@ -251,12 +251,17 @@ Every `@service`-decorated class gets a deterministic **contract ID** -- a BLAKE
 
 Two services with the same name, version, methods, types, and serialization mode will produce the same contract ID, regardless of the implementation. This enables service discovery: a consumer can ask "give me a service with contract ID X" and know it will get a compatible interface.
 
-The contract ID is computed automatically. You do not need to set it. It is available on the `ServiceInfo` metadata:
+The contract ID is computed automatically. You do not need to set it. `contract_id_from_service` returns it for any `@service`-decorated class:
 
 ```python
 from aster.contract.identity import contract_id_from_service
 
-cid = contract_id_from_service(HelloService)
+@service
+class Calculator:
+    @rpc
+    async def add(self, req: AddRequest) -> AddResponse: ...
+
+cid = contract_id_from_service(Calculator)
 print(cid)  # e.g. "a1b2c3d4..."
 ```
 
@@ -264,20 +269,20 @@ If you change a method signature, add a method, or change the serialization mode
 
 ## Serialization modes
 
-Aster supports two serialization modes via Apache Fory:
+Aster supports three serialization modes:
 
 | Mode | Enum value | Description |
 |------|-----------|-------------|
-| **XLANG** | `SerializationMode.XLANG` | Cross-language mode. Types are registered with string tags (via `@wire_type` or auto-derivation). Works across Python, Java, Go, Rust, etc. This is the default. |
-| **NATIVE** | `SerializationMode.NATIVE` | Python-only mode. Uses Fory's native Python serialization, which is faster but only works between Python peers. No `@wire_type` tags needed. |
+| **XLANG** | `SerializationMode.XLANG` | Cross-language mode via Apache Fory. Types are registered with string tags (via `@wire_type` or auto-derivation). Works across Python, TypeScript, Java, Go, Rust, etc. This is the default. |
+| **NATIVE** | `SerializationMode.NATIVE` | Language-native Fory serialization. Faster than XLANG but only works between peers in the same language. For deployments where interoperability is second to performance. No `@wire_type` tags needed. |
+| **JSON** | `SerializationMode.JSON` | JSON-over-the-wire mode. Slower and less compact than Fory, but human-readable on the wire and the only mode supported by the dynamic proxy client (`client.proxy("ServiceName")`). Useful for cross-language testing, shell exploration, and services that want to be consumable without a typed client. |
 
-Most users never need to change the serialization mode. The default (XLANG) works for both Python-to-Python and cross-language communication. Use NATIVE only when you are certain both sides are Python and you need the performance boost.
+Most users never need to change the serialization mode. The default (XLANG) works for both Python-to-Python and cross-language communication. Use NATIVE for a performance boost when you are certain both sides are Python. Use JSON when you want proxy-client compatibility or on-the-wire readability.
 
 To change the mode:
 
 ```python
-from aster.decorators import service
-from aster.types import SerializationMode
+from aster import service, rpc, SerializationMode
 
 
 # All methods in this service use NATIVE serialization.
@@ -287,8 +292,6 @@ class FastService:
 
 
 # Override for a single method.
-from aster.decorators import rpc
-
 @service
 class MixedService:
     @rpc(serialization=SerializationMode.NATIVE)
@@ -309,8 +312,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import AsyncIterator
 
-from aster.codec import wire_type
-from aster.decorators import service, rpc, server_stream
+from aster import service, rpc, server_stream, wire_type
 
 
 @wire_type("todo/Task")

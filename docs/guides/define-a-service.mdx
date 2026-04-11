@@ -17,7 +17,7 @@ Every request and response type needs a stable wire identity for cross-language 
 
 ```python
 from dataclasses import dataclass
-from aster.codec import wire_type
+from aster import wire_type
 
 @wire_type("myapp/TaskRequest")
 @dataclass
@@ -76,9 +76,9 @@ The `@service` decorator marks a class as an Aster RPC service. It scans the cla
   <TabItem value="python" label="Python">
 
 ```python
-from aster.decorators import service
+from aster import service
 
-# Bare — service name defaults to class name
+# Bare -- service name defaults to class name
 @service
 class TaskService:
     ...
@@ -123,7 +123,7 @@ class TaskService {
 | `name` | `str` | `string` | Class name | Service name used in the wire protocol and discovery. |
 | `version` | `int` | `number` | `1` | Service version. Distinct versions are separate services. |
 | `serialization` | `SerializationMode` or list | `SerializationMode[]` | `[XLANG]` | Supported serialization modes. |
-| `scoped` | `str` | `'shared' \| 'stream'` | `"shared"` | `"shared"` for singleton, `"stream"` for per-connection instances. |
+| `scoped` | `str` | `'shared' \| 'session'` | `"shared"` | `"shared"` for singleton, `"session"` for per-connection instances (class `__init__` receives a `peer` argument). |
 | `requires` | `CapabilityRequirement` | `CapabilityRequirement` | `None` / `undefined` | Capability required to call any method on this service. |
 
 ## RPC methods
@@ -136,7 +136,7 @@ A unary method takes one request and returns one response:
   <TabItem value="python" label="Python">
 
 ```python
-from aster.decorators import service, rpc
+from aster import service, rpc
 
 @service
 class TaskService:
@@ -282,7 +282,6 @@ class TaskService {
 
   </TabItem>
 </LanguageTabs>
-```
 
 ## Method options
 
@@ -307,32 +306,36 @@ Aster supports three serialization modes, configurable at the service or method 
 
 | Mode | Description | Use case |
 |------|-------------|----------|
-| `XLANG` | Cross-language Fory serialization with `@wire_type` tags. | Default. Required for cross-language interop. |
-| `NATIVE` | Python-native Fory serialization. No `@wire_type` required. | Single-language deployments where performance matters. |
-| `ROW` | Row-oriented format with zero-copy random-access fields. | Data-heavy workloads, analytics pipelines. |
+| `XLANG` | Cross-language Apache Fory serialization with `@wire_type` tags. | Default. Required for cross-language interop (Python &harr; TypeScript &harr; Java &harr; Go). |
+| `NATIVE` | Language-native Fory serialization. No `@wire_type` required. | Deployments where interoperability is second to performance. |
+| `JSON` | Human-readable JSON on the wire. | Debuggability (`tcpdump` / `wireshark` show readable payloads), shell exploration via the dynamic proxy client, and any service that wants to be consumable without a typed client. |
 
 ```python
-from aster.types import SerializationMode
+from aster import service, rpc, SerializationMode
 
-@service(serialization=[SerializationMode.XLANG, SerializationMode.NATIVE])
-class AnalyticsService:
+# Accept both the high-performance native mode AND the debuggable JSON mode
+# on the same service. Clients pick one at call time.
+@service(serialization=[SerializationMode.NATIVE, SerializationMode.JSON])
+class TaskService:
 
-    @rpc(serialization=SerializationMode.ROW)
-    async def query(self, req: QueryRequest) -> QueryResult:
+    @rpc
+    async def get_task(self, req: TaskRequest) -> TaskResult:
         ...
 ```
 
+> **Note:** the dynamic proxy client (`client.proxy("ServiceName")`) always speaks JSON. If you want the proxy to work against a service, include `SerializationMode.JSON` in its supported modes, or use a typed client for NATIVE/XLANG-only services.
+
 ## Session-scoped services
 
-By default, services are shared: one instance handles all connections. Session-scoped services create a new instance per QUIC stream, allowing per-connection state.
+By default, services are shared: one instance handles all connections. Session-scoped services create a new instance per connection, allowing per-connection state.
 
 ```python
-@service("ChatRoom", scoped="stream")
+@service("ChatRoom", scoped="session")
 class ChatRoomService:
 
-    def __init__(self, peer: str | None = None):
-        self.peer = peer or "unknown"
-        self.nickname = f"anon-{self.peer[:8]}"
+    def __init__(self, peer: str):
+        self.peer = peer
+        self.nickname = f"anon-{peer[:8]}"
         self.messages: list[str] = []
 
     @rpc
@@ -352,9 +355,10 @@ class ChatRoomService:
 
 Requirements for session-scoped services:
 
-- `__init__` must accept a `peer` parameter (the remote peer's endpoint ID as a hex string).
+- `__init__` must accept a `peer` positional parameter (the remote peer's endpoint id as a hex string). The framework calls `cls(peer)` when a new session opens.
 - Instance attributes persist across all RPC calls within the session.
 - `on_session_close()` is called when the client closes the session or disconnects.
+- Session-scoped services are multiplexed over a single bidirectional QUIC stream per consumer -- one session, one stream, multiple method calls.
 
 ## Full working example
 
@@ -362,9 +366,10 @@ Requirements for session-scoped services:
 from dataclasses import dataclass
 from typing import AsyncIterator
 
-from aster.codec import wire_type
-from aster.decorators import service, rpc, server_stream, client_stream, bidi_stream
-from aster.types import SerializationMode
+from aster import (
+    service, rpc, server_stream, client_stream, bidi_stream,
+    wire_type, SerializationMode,
+)
 
 # --- Wire types ---
 

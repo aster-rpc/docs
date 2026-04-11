@@ -65,7 +65,7 @@ Create `hello_service.py`:
 
 ```python
 from dataclasses import dataclass
-from aster.decorators import service, rpc
+from aster import service, rpc
 
 
 @dataclass
@@ -85,38 +85,25 @@ class HelloService:
         return HelloResponse(message=f"Hello, {req.name}!")
 ```
 
-Three decorators: `@dataclass` (standard Python), `@service` (marks the class as an Aster service), `@rpc` (marks a method as a callable endpoint). No schema files, no code generation, no base classes.
+Three decorators: `@dataclass` (standard Python), `@service` (marks the class as an Aster service), `@rpc` (marks a method as a callable endpoint). No schema files, no code generation, no base classes. Wire tags are auto-derived from the class names; for production cross-language services you'll add explicit `@wire_type("ns/Type")` decorators -- see [Defining Services and Types](/docs/guides/services).
 
 </TabItem>
 <TabItem value="typescript" label="TypeScript">
-
-Create `types.ts`:
-
-```typescript
-import { WireType } from '@aster-rpc/aster';
-
-@WireType("hello/HelloRequest")
-export class HelloRequest {
-  name = "";
-  constructor(init?: Partial<HelloRequest>) {
-    if (init) Object.assign(this, init);
-  }
-}
-
-@WireType("hello/HelloResponse")
-export class HelloResponse {
-  message = "";
-  constructor(init?: Partial<HelloResponse>) {
-    if (init) Object.assign(this, init);
-  }
-}
-```
 
 Create `service.ts`:
 
 ```typescript
 import { Service, Rpc } from '@aster-rpc/aster';
-import { HelloRequest, HelloResponse } from './types.js';
+
+class HelloRequest {
+  name = "";
+  constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
+}
+
+class HelloResponse {
+  message = "";
+  constructor(init?: Partial<HelloResponse>) { if (init) Object.assign(this, init); }
+}
 
 @Service({ name: "HelloService", version: 1 })
 export class HelloService {
@@ -129,7 +116,7 @@ export class HelloService {
 }
 ```
 
-Three decorators: `@WireType` (stable wire identity), `@Service` (marks the class), `@Rpc` (marks a method). No schema files, no code generation, no base classes.
+Two decorators: `@Service` (marks the class as an Aster service), `@Rpc` (marks a method as a callable endpoint). No schema files, no code generation, no base classes. Wire tags are auto-derived from the class names; for production cross-language services you'll add explicit `@WireType("ns/Type")` decorators -- see [Defining Services and Types](/docs/guides/services).
 
 </TabItem>
 </LanguageTabs>
@@ -174,7 +161,6 @@ import { HelloService } from './service.js';
 const server = new AsterServer({
   services: [new HelloService()],
 });
-
 await server.start();
 console.log("Producer ready at:", server.address);
 await server.serve();
@@ -232,17 +218,18 @@ Create `consumer.ts`:
 
 ```typescript
 import { AsterClientWrapper } from '@aster-rpc/aster';
-import { HelloService } from './service.js';
-import { HelloRequest } from './types.js';
 
 const client = new AsterClientWrapper({
   address: process.env.ASTER_ENDPOINT_ADDR!,
 });
-
 await client.connect();
-const hello = await client.proxy("HelloService");
+
+// The dynamic proxy speaks JSON and needs no local type definitions --
+// methods are discovered from the producer's published contract.
+const hello = client.proxy("HelloService");
 const resp = await hello.sayHello({ name: "World" });
 console.log(resp.message); // Hello, World!
+
 await client.close();
 ```
 

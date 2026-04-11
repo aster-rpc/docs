@@ -17,10 +17,11 @@ Production-ready for 0.1-alpha. The Python binding is the first-class implementa
 ## Installation
 
 ```bash
-pip install aster-python
+pip install aster-rpc           # framework
+pip install aster-cli           # optional: shell, contract gen, trust commands
 ```
 
-**Requirements:** Python 3.9+, macOS / Linux / Windows.
+**Requirements:** Python 3.9 -- 3.13, macOS / Linux / Windows.
 
 The package includes a native extension (compiled Rust via PyO3), so wheels are provided for common platforms. Building from source requires a Rust toolchain and maturin.
 
@@ -29,8 +30,7 @@ The package includes a native extension (compiled Rust via PyO3), so wheels are 
 ```python
 import asyncio
 from dataclasses import dataclass
-from aster import AsterServer, AsterClient
-from aster.decorators import service, rpc
+from aster import AsterServer, AsterClient, service, rpc
 
 @dataclass
 class HelloRequest:
@@ -52,7 +52,7 @@ async def main():
         addr = srv.address
 
         # Consumer
-        async with AsterClient(endpoint_addr=addr) as client:
+        async with AsterClient(address=addr) as client:
             hello = await client.client(HelloService)
             resp = await hello.say_hello(HelloRequest(name="World"))
             print(resp.message)  # "Hello, World!"
@@ -86,10 +86,8 @@ Define services and methods with decorators on plain Python classes:
 
 | API | Purpose |
 |-----|---------|
-| `AsterClient(endpoint_addr=...)` | High-level declarative consumer. Handles admission and service discovery. |
+| `AsterClient(address="aster1...")` | High-level declarative consumer. Handles admission and service discovery. |
 | `create_client(ServiceClass, connection=conn)` | Lower-level client. Wraps an existing QUIC connection. |
-| `create_local_client(ServiceClass, server)` | In-process client using `LocalTransport` (for testing). |
-| `create_session(ServiceClass, connection=conn)` | Session-scoped client with per-connection state. |
 
 ### Configuration
 
@@ -126,8 +124,8 @@ Built-in middleware chain:
 
 | API | Purpose |
 |-----|---------|
-| `@service(scoped="stream")` | Per-connection service instances. |
-| `create_session(ServiceClass, connection=conn)` | Open a session-scoped stream from the client. |
+| `@service(scoped="session")` | Producer-side: per-connection service instances (the class `__init__` receives a `peer` argument). |
+| `await client.session("ServiceName")` | Consumer-side: open a multiplexed session against a session-scoped service. Returns a `SessionProxyClient` whose method calls share one bidi stream. |
 
 ## Architecture
 

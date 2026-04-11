@@ -66,10 +66,6 @@ const sidebars: SidebarsConfig = {
             'bindings/javascript/ts-client',
           ],
         },
-        'bindings/rust/index',
-        'bindings/jvm/index',
-        'bindings/dotnet/index',
-        'bindings/go/index',
       ],
     },
     {

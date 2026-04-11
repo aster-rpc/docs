@@ -8,9 +8,9 @@ import LanguageTabs, {TabItem} from '@site/src/components/LanguageTabs';
 
 Aster uses [Apache Fory](https://fury.apache.org) for serialization. Fory is a high-performance, cross-language serialization framework that operates on native language objects -- no IDL compilation required, no generated code to maintain.
 
-## Three serialization modes
+## Four serialization modes
 
-Fory provides three distinct serialization modes. Each serves a different use case, and Aster exposes all three. The mode is declared per-service, with per-method override available.
+Aster exposes four serialization modes -- three from Fory and one universal JSON escape hatch. The mode is declared per-service, with per-method override available.
 
 ### XLANG (cross-language)
 
@@ -29,33 +29,30 @@ NATIVE mode uses the language's own serialization primitives -- Fory replaces pi
 
 Use NATIVE when:
 - Both sides of the call are in the same language.
-- Maximum serialization performance is the priority.
-- Cross-language interoperability is not needed for this service.
+- Deployments where interoperability is second to performance.
 
 ### ROW (zero-copy random access)
 
-ROW mode produces a columnar binary format that supports zero-copy field access. Individual fields can be read without deserializing the entire message. This is useful for data-heavy workloads where only a subset of fields is needed per operation, or where integration with columnar data systems (e.g., Apache Arrow) is valuable.
+ROW mode produces a row-oriented binary format from Fory that supports zero-copy field access. Individual fields can be read without deserializing the entire message. Useful for data-heavy workloads where the consumer reads only a subset of fields per record, or where the schema is sent once and many rows follow.
 
 Use ROW when:
 - Payloads are large and consumers often access only a few fields.
-- Partial deserialization improves performance.
-- Columnar data integration is needed.
+- You're streaming many records with a stable schema (the schema is hoisted into the first frame and amortized across the stream).
+- You're integrating with columnar data systems.
 
-### JSON (universal fallback)
+### JSON (debuggable, universal)
 
 JSON mode uses UTF-8 JSON for request and response payloads. All frames on a stream -- including the `StreamHeader` and `RpcStatus` trailer -- are JSON objects. Field names use camelCase.
 
-JSON mode exists for language bindings where the Fory XLANG implementation is not yet production-ready (e.g., TypeScript). All Aster servers accept JSON mode alongside their declared Fory modes -- no configuration needed.
-
 Use JSON when:
-- The client is in a language without a mature Fory XLANG implementation.
-- Debugging wire traffic (JSON is human-readable).
-- Building quick prototypes with the proxy client.
+- You want readable wire traffic for debugging (`tcpdump` / `wireshark` show payloads as plain text instead of opaque binary -- the classic gRPC pain point).
+- You're building quick prototypes with the dynamic proxy client (`client.proxy("ServiceName")`), which always speaks JSON.
+- A client is in a language without a mature Fory XLANG implementation.
 
-Clients that support Fory XLANG should prefer it for performance. JSON mode is a universal fallback, not the primary path.
+Clients that support Fory XLANG should prefer it for performance and payload size. JSON mode is the escape hatch, not the primary path.
 
 :::info
-The Python proxy client (`client.proxy("ServiceName")`) uses JSON mode automatically. Generated typed clients use Fory XLANG.
+The dynamic proxy client (`client.proxy("ServiceName")`) uses JSON mode automatically -- so any service that supports JSON mode can be called from the shell or from a Python/TypeScript proxy without generating a typed client first. Generated typed clients use Fory XLANG by default.
 :::
 
 ## Mode selection
@@ -66,7 +63,7 @@ A service declares its default serialization mode. Individual methods can overri
   <TabItem value="python" label="Python">
 
 ```python
-from aster import service, rpc, server_stream, SerializationMode
+from aster import service, rpc, SerializationMode
 
 @service(
     name="Analytics",

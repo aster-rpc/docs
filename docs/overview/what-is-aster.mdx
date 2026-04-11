@@ -18,7 +18,7 @@ Aster is composed of three layers, each of which can be understood and used inde
 
 **Transport: iroh QUIC.** The connection layer is [iroh](https://iroh.computer), which provides QUIC over UDP with built-in NAT traversal, relay fallback, and connection migration. Every endpoint is identified by its ed25519 public key (called an `EndpointId`). You can use iroh's transport directly, without Aster's RPC layer.
 
-**Serialization: Apache Fory.** The wire format is [Apache Fory](https://fury.apache.org), a high-performance cross-language serialization framework. Fory serializes native language objects directly -- no IDL compilation step, no generated code. It supports three modes: XLANG (cross-language, tagged types), NATIVE (single-language, maximum performance), and ROW (zero-copy random access).
+**Serialization: Apache Fory, with a JSON escape hatch.** The default wire format is [Apache Fory](https://fury.apache.org), a high-performance cross-language serialization framework. Fory serializes native language objects directly -- no IDL compilation step, no generated code. Aster exposes three modes: **XLANG** (cross-language, tagged types, the default), **NATIVE** (interoperability second to performance), and **JSON** (human-readable on the wire). JSON mode is the way out of the classic gRPC debugging trap: when something is going wrong in production and you reach for `tcpdump` or `wireshark`, you get readable payloads instead of opaque protobuf bytes. It is also the mode the dynamic proxy client (`client.proxy("ServiceName")`) speaks, so you can call any Aster service from the shell without generating a typed client first.
 
 **Contract: language-native service definitions.** Services are defined using the idioms of your language -- decorators in Python, annotations in Java, attributes in C#, macros in Rust. There is no `.proto` file, no code generation step. The framework extracts a canonical service definition from your code and hashes it with BLAKE3 to produce a `contract_id` that uniquely identifies the service interface.
 
@@ -46,15 +46,16 @@ This is not "gRPC but faster." It is a fundamentally different model, built for 
 
 ## Language support
 
-The Python implementation is the reference binding. TypeScript is the second binding, sharing the same Rust core and wire protocol.
+Python and TypeScript are first-class alpha bindings today, sharing the same Rust core and wire protocol. Java, .NET, Kotlin, and Go are in progress. Rust is planned.
 
 | Language | Status |
 | --- | --- |
-| Python | Reference implementation (active) |
-| TypeScript | Alpha (active — mirrors Python feature set) |
+| Python | Alpha (first-class) |
+| TypeScript | Alpha (first-class) |
+| Java | In progress |
+| .NET (C#/F#) | In progress |
+| Kotlin | In progress |
+| Go | In progress |
 | Rust | Planned |
-| JVM (Java/Kotlin) | Planned |
-| .NET (C#/F#) | Planned |
-| Go | Planned |
 
 All language implementations share the same wire protocol and produce identical bytes on the wire. A service written in any supported language can interoperate with clients in any other.

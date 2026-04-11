@@ -8,13 +8,13 @@ The `aster` command-line tool provides utilities for managing profiles, enrollin
 
 ## Installation
 
-The CLI is included in the `aster-python` package:
+The CLI ships as a separate package, `aster-cli`, which depends on `aster-rpc`:
 
 ```bash
-pip install aster-python
+pip install aster-cli
 ```
 
-Or install the CLI separately from the `cli/` directory:
+This installs both the framework and the `aster` command-line tool. Or install from a source checkout:
 
 ```bash
 pip install -e cli/

@@ -21,8 +21,7 @@ For typical request/response RPC, the default `XLANG` mode is simpler and suffic
 ROW mode can be set at the service level or per-method:
 
 ```python
-from aster.types import SerializationMode
-from aster.decorators import service, rpc, server_stream
+from aster import service, rpc, SerializationMode
 
 @service(serialization=SerializationMode.ROW)
 class DataPipelineService:
@@ -54,9 +53,7 @@ class AnalyticsService:
 from dataclasses import dataclass
 from typing import AsyncIterator
 
-from aster.codec import wire_type
-from aster.decorators import service, rpc, server_stream
-from aster.types import SerializationMode
+from aster import service, rpc, server_stream, wire_type, SerializationMode
 
 @wire_type("analytics/QueryRequest")
 @dataclass
@@ -127,7 +124,7 @@ ROW mode is most useful with `@server_stream` when sending large result sets. Th
 ```python
 from aster import AsterClient
 
-async with AsterClient(endpoint_addr="...") as client:
+async with AsterClient(address="aster1...") as client:
     analytics = await client.client(AnalyticsService)
 
     async for row in await analytics.scan(QueryRequest(table="metrics", limit=500)):

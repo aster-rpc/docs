@@ -254,6 +254,12 @@ in real time using server streaming.
 from collections.abc import AsyncIterator
 from aster import server_stream
 
+# Ordered severity used by the level filter below.
+_LEVEL_ORDER = {"debug": 0, "info": 1, "warn": 2, "error": 3, "fatal": 4}
+
+def _level_rank(level: str) -> int:
+    return _LEVEL_ORDER.get(level.lower(), 0)
+
 @wire_type("mission/LogEntry")
 @dataclass
 class LogEntry:
@@ -302,6 +308,14 @@ class MissionControl:
 
 ```typescript
 import { ServerStream } from '@aster-rpc/aster';
+
+// Ordered severity used by the level filter below.
+const LEVEL_ORDER: Record<string, number> = {
+    debug: 0, info: 1, warn: 2, error: 3, fatal: 4,
+};
+function levelRank(level: string): number {
+    return LEVEL_ORDER[level.toLowerCase()] ?? 0;
+}
 
 @WireType("mission/LogEntry")
 class LogEntry {
@@ -367,6 +381,45 @@ class MissionControl {
 #1 {"timestamp": 1712567891.3, "level": "error", "message": "health check failed", ...}
 # Ctrl+C to stop
 ```
+
+Or from your own code using the proxy client:
+
+<LanguageTabs>
+<TabItem value="python">
+
+```python
+# Server-streaming methods are called via `.stream(...)` and iterated
+# with `async for`. The plain `await mc.tailLogs({...})` form is for
+# unary methods only — it will raise on a streaming RPC.
+async for entry in mc.tailLogs.stream({"level": "warn"}):
+    print(entry)
+```
+
+</TabItem>
+<TabItem value="typescript">
+
+```typescript
+// Server-streaming methods are called via `.stream(...)` and iterated
+// with `for await`. Calling `await mc.tailLogs({...})` directly is for
+// unary methods only — it will throw on a streaming RPC.
+for await (const entry of mc.tailLogs.stream({ level: "warn" })) {
+    console.log(entry);
+}
+```
+
+</TabItem>
+</LanguageTabs>
+
+:::tip Proxy method shapes
+The proxy uses a different call form per RPC pattern, mirroring what each one actually does:
+
+| Pattern | Python | TypeScript |
+|---|---|---|
+| Unary | `await mc.getStatus({...})` | `await mc.getStatus({...})` |
+| Server stream | `async for x in mc.tailLogs.stream({...}):` | `for await (const x of mc.tailLogs.stream({...}))` |
+| Client stream | `await mc.ingestMetrics(async_iter)` | `await mc.ingestMetrics(asyncIter)` |
+| Bidi stream | `ch = mc.runCommand.bidi(); await ch.open(); ...` | `const ch = mc.runCommand.bidi(); await ch.open(); ...` |
+:::
 
 > **Tip:** `tailLogs` blocks until a log entry arrives. Submit a log from
 > another terminal (`aster call ... MissionControl.submitLog '{"message":"test"}'`)
@@ -707,12 +760,16 @@ Two service types, two different lifetimes:
 **Goal:** Not every caller should be able to deploy or run commands on agents.
 Define roles, compose requirements, and issue scoped credentials.
 
+Up until now the system has run in `open-gate` mode. That's fine sometimes, but other times you need to put controls on who can access your service. In this step, we will enable authentication so our service will no longer be open to anyone who contacts our node — callers will have to prove they're _authorized_.
+
 The auth flow has three steps:
 1. **Define** — declare which capabilities each method requires (in code)
 2. **Issue** — create credentials with specific capabilities (CLI)
 3. **Connect** — present the credential on connect; the framework enforces access
 
 ### Step 1: Generate a root key
+
+The root key is the trust anchor for your entire deployment. **It identifies you personally as the owner of your deployment**. Keep it offline — you'll use it to sign credentials, not to run services.
 
 ```bash
 # One-time setup — generates an Ed25519 keypair
@@ -731,7 +788,8 @@ aster trust keygen --out-key ~/.aster/root.key
 
 ```python
 from enum import Enum
-from aster import any_of, all_of
+from aster import any_of
+# Also available: `all_of(A, B)` — caller must have BOTH roles.
 
 class Role(str, Enum):
     STATUS  = "ops.status"
@@ -767,7 +825,8 @@ class AgentSession:
 <TabItem value="typescript">
 
 ```typescript
-import { anyOf, allOf } from '@aster-rpc/aster';
+import { anyOf } from '@aster-rpc/aster';
+// Also available: `allOf(A, B)` — caller must have BOTH roles.
 
 const Role = {
     STATUS:  "ops.status",
@@ -812,12 +871,12 @@ class AgentSession {
 
 ```python
 config = AsterConfig(
-    root_pubkey_file="~/.aster/root.pub",
+    root_pubkey_file="~/.aster/root.pub", # <- this is the owner's public key (i.e. yours)
     allow_all_consumers=False,
 )
 async with AsterServer(
     services=[MissionControl(), AgentSession()],
-    identity=".aster-identity",
+    identity=".aster-identity", # <- this is the identity of the endpoint
     config=config,
 ) as srv:
     print(srv.address)
@@ -830,8 +889,10 @@ async with AsterServer(
 ```typescript
 const server = new AsterServer({
     services: [new MissionControl(), new AgentSession()],
-    identity: ".aster-identity",
-    config: { rootPubkeyFile: "~/.aster/root.pub" },
+    identity: ".aster-identity", // <- this is the identity of the endpoint
+    config: {
+        rootPubkeyFile: "~/.aster/root.pub", // <- this is the owner's public key (i.e. yours)
+    },
     allowAllConsumers: false,
 });
 await server.start();
@@ -842,7 +903,15 @@ await server.serve();
 </TabItem>
 </LanguageTabs>
 
+Each Aster endpoint will have its own identity (secret key pair) and it will have the public key of its owner (you) so it knows who administers it.
+
+:::note No `.aster-identity` file?
+Aster generates a fresh ephemeral keypair on startup. That's fine for experiments, but every restart gives you a new endpoint id — and any credentials you issued to the old one will stop working. Once you start enrolling peers, commit to a persistent identity file.
+:::
+
 ### Step 4: Enroll agents
+
+When you want to allow another endpoint connect to yours, you must give it permission. You do that by generating a _credential_ for it and putting in it the roles that endpoint should have.
 
 ```bash
 # Edge agent — status and ingest only
@@ -894,7 +963,7 @@ server checks that the QUIC peer ID matches the credential's
 :::
 
 ```bash
-# Operator — full access including admin
+# Ops team — full access including admin
 aster enroll node --role consumer --name "ops-team" \
     --capabilities ops.status,ops.logs,ops.admin,ops.ingest \
     --root-key ~/.aster/root.key \
