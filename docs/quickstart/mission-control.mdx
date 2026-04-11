@@ -101,6 +101,53 @@ graph LR
 
 ---
 
+## Install
+
+<LanguageTabs defaultValue="python">
+<TabItem value="python" label="Python">
+
+Two packages -- the framework and the CLI:
+
+```bash
+uv pip install aster-rpc aster-cli
+# or:
+pip install aster-rpc aster-cli
+```
+
+The framework gives you `from aster import ...` for your service code. The CLI gives you `aster shell`, `aster trust keygen`, `aster enroll node`, and `aster contract gen-client` -- the operator tools you'll use throughout this guide.
+
+**Requirements:** Python 3.9 -- 3.13, macOS / Linux / Windows.
+
+</TabItem>
+<TabItem value="typescript" label="TypeScript">
+
+Two pieces -- the TypeScript runtime and the CLI tools:
+
+```bash
+# In your TypeScript project:
+bun add @aster-rpc/aster
+# or: npm install @aster-rpc/aster
+
+# The CLI ships as a Python package and is shared across all language
+# bindings -- one shell, one trust manager, one contract generator,
+# usable against any Aster server regardless of language:
+uv tool install aster-cli
+# or: pip install aster-cli
+```
+
+**Requirements:** Node.js 20+ or Bun 1.0+ for the TypeScript runtime. Python 3.9 -- 3.13 for the CLI (one-time install; day-to-day work stays in TypeScript).
+
+</TabItem>
+</LanguageTabs>
+
+Verify:
+
+```bash
+aster --version
+```
+
+---
+
 ## Chapter 1: Your First Agent Check-In (5 min)
 
 **Goal:** The full working version of what you just saw — define a service,
