@@ -76,15 +76,16 @@ const sidebars: SidebarsConfig = {
         'reference/architecture',
         'reference/configuration',
         'reference/cli',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Examples',
-      items: [
-        'examples/hello-service',
-        'examples/cross-language',
-        'examples/data-heavy-row-mode',
+        {
+          type: 'link',
+          label: 'Python API (pdoc)',
+          href: 'https://docs.aster.site/api/python/',
+        },
+        {
+          type: 'link',
+          label: 'TypeScript API (TypeDoc)',
+          href: 'https://docs.aster.site/api/typescript/',
+        },
       ],
     },
   ],
