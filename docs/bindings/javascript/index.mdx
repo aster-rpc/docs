@@ -35,40 +35,56 @@ The `@aster-rpc/transport` native addon is included as a dependency and auto-sel
 
 ## Quick example
 
-```typescript
-import { Service, Rpc, WireType, AsterServer, createClient, LocalTransport, ServiceRegistry } from '@aster-rpc/aster';
+A producer hosts a service over QUIC; a consumer connects by address.
 
-// Define wire types
-@WireType("hello/HelloRequest")
+```typescript
+// service.ts
+import { Service, Rpc, AsterServer, AsterClientWrapper } from '@aster-rpc/aster';
+
 class HelloRequest {
   name = "";
   constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
 }
 
-@WireType("hello/HelloResponse")
 class HelloResponse {
   message = "";
   constructor(init?: Partial<HelloResponse>) { if (init) Object.assign(this, init); }
 }
 
-// Define service
 @Service({ name: "Hello", version: 1 })
-class HelloService {
-  @Rpc()
+export class HelloService {
+  @Rpc({ request: HelloRequest, response: HelloResponse })
   async sayHello(req: HelloRequest): Promise<HelloResponse> {
     return new HelloResponse({ message: `Hello, ${req.name}!` });
   }
 }
 
-// Create and call
-const registry = new ServiceRegistry();
-registry.register(new HelloService());
-const transport = new LocalTransport(registry);
-
-const client = createClient(HelloService, transport);
-const result = await client.sayHello(new HelloRequest({ name: "TypeScript" }));
-console.log(result.message); // "Hello, TypeScript!"
+// Producer
+const server = new AsterServer({ services: [new HelloService()] });
+await server.start();
+console.log("Producer ready at:", server.address);
+await server.serve();
 ```
+
+```typescript
+// consumer.ts
+import { AsterClientWrapper } from '@aster-rpc/aster';
+
+const client = new AsterClientWrapper({
+  address: process.env.ASTER_ENDPOINT_ADDR!,
+});
+await client.connect();
+
+// The dynamic proxy speaks JSON and needs no local type definitions --
+// methods are discovered from the producer's published contract.
+const hello = client.proxy("Hello");
+const reply = await hello.sayHello({ name: "TypeScript" });
+console.log(reply.message); // "Hello, TypeScript!"
+
+await client.close();
+```
+
+For full type safety on the consumer side, generate a typed client with `aster contract gen-client <address> --lang typescript --out ./clients` and import it instead of using `client.proxy()`.
 
 ## Architecture
 

@@ -17,13 +17,13 @@ import { HelloService } from './service.js';
 const server = new AsterServer({
   services: [new HelloService()],
   config: {
-    healthPort: 8080,
     logFormat: 'json',
   },
 });
 
 await server.start();
-console.log("Server started");
+console.log("Producer ready at:", server.address);
+await server.serve(); // blocks until shutdown
 ```
 
 ### Options
@@ -32,13 +32,17 @@ console.log("Server started");
 |--------|------|---------|-------------|
 | `services` | `object[]` | Required | Array of `@Service`-decorated instances |
 | `config` | `Partial<AsterConfig>` | `{}` | Override config values |
+| `identity` | `string` | `undefined` | Path to a `.aster-identity` TOML file |
+| `peer` | `string` | `undefined` | Peer name to load from the identity file |
+| `allowAllConsumers` | `boolean` | `true` | Open-gate mode (dev). Set `false` for trusted mode. |
 | `interceptors` | `Interceptor[]` | `[]` | Server-side interceptors |
 
 ### Methods
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `start()` | `Promise<void>` | Start the server (create node, publish contracts, start health) |
+| `start()` | `Promise<void>` | Start the server (create node, publish contracts, open admission) |
+| `serve()` | `Promise<void>` | Block until the server is shut down (Ctrl+C in scripts) |
 | `close()` | `Promise<void>` | Graceful shutdown |
 | `localTransport()` | `LocalTransport` | In-process transport for testing |
 
@@ -46,7 +50,7 @@ console.log("Server started");
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `endpointAddr` | `string \| undefined` | Base64 NodeAddr for clients |
+| `address` | `string` | `aster1...` ticket consumers connect to |
 | `running` | `boolean` | Whether the server is running |
 | `registry` | `ServiceRegistry` | The service registry |
 | `config` | `AsterConfig` | Resolved configuration |
@@ -85,28 +89,36 @@ class EchoService { ... }
 ### @Rpc
 
 ```typescript
-@Rpc({ timeout: 30, idempotent: true })
+@Rpc({ request: EchoRequest, response: EchoResponse, timeout: 30, idempotent: true })
 async echo(req: EchoRequest): Promise<EchoResponse> { ... }
 ```
+
+> **Note:** TypeScript erases generic type parameters at runtime, so the
+> contract publisher and the `gen-client` codegen pipeline cannot discover
+> the request and response shapes from the method signature alone. Pass
+> the constructors explicitly via `request:` and `response:` so the
+> published manifest carries the wire tag and field list -- this is
+> required for cross-language consumers (Python, Go, Java) to talk to
+> the service.
 
 ### @ServerStream
 
 ```typescript
-@ServerStream()
+@ServerStream({ request: WatchRequest, response: ItemUpdate })
 async *watchItems(req: WatchRequest): AsyncGenerator<ItemUpdate> { ... }
 ```
 
 ### @ClientStream
 
 ```typescript
-@ClientStream()
+@ClientStream({ request: Item, response: BatchResult })
 async uploadBatch(requests: AsyncIterable<Item>): Promise<BatchResult> { ... }
 ```
 
 ### @BidiStream
 
 ```typescript
-@BidiStream()
+@BidiStream({ request: Message, response: Message })
 async *chat(requests: AsyncIterable<Message>): AsyncGenerator<Message> { ... }
 ```
 

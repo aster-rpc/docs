@@ -6,24 +6,63 @@ slug: /bindings/typescript/client
 
 # TypeScript Client Reference
 
-## createClient
+## AsterClientWrapper
 
-The primary way to create a typed RPC client. Uses JavaScript `Proxy` for method interception with full TypeScript type inference.
+The primary way to connect to an Aster server over QUIC. Handles consumer admission, service discovery, and the proxy/typed-client surface.
 
 ```typescript
-import { createClient, LocalTransport, ServiceRegistry } from '@aster-rpc/aster';
-import { HelloService } from './service.js';
-import { HelloRequest } from './types.js';
+import { AsterClientWrapper } from '@aster-rpc/aster';
 
-const registry = new ServiceRegistry();
-registry.register(new HelloService());
-const transport = new LocalTransport(registry);
+const client = new AsterClientWrapper({
+  address: "aster1...",
+});
+await client.connect();
+
+// Dynamic proxy: speaks JSON, no local types needed
+const hello = client.proxy("Hello");
+const reply = await hello.sayHello({ name: "World" });
+console.log(reply.message);
+
+await client.close();
+```
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `address` | `string` | `undefined` | `aster1...` ticket of the producer to connect to |
+| `transport` | `AsterTransport` | `undefined` | Pre-built transport (for tests). Mutually exclusive with `address`. |
+| `config` | `Partial<AsterConfig>` | `{}` | Override config values |
+| `identity` | `string` | `undefined` | Path to a `.aster-identity` TOML file |
+| `peer` | `string` | `undefined` | Peer name to load from the identity file |
+| `enrollmentCredentialFile` | `string` | `undefined` | Path to a `.cred` enrollment credential for trusted-mode servers |
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `connect()` | `Promise<void>` | Run consumer admission against the producer and discover services |
+| `proxy(name)` | `ProxyClient` | Dynamic proxy for a service. Speaks JSON; no codegen needed. |
+| `client(ServiceClass)` | `Promise<typed client>` | Typed client built from a generated client class |
+| `session(name)` | `Promise<SessionProxyClient>` | Open a multiplexed session against a session-scoped service |
+| `close()` | `Promise<void>` | Close the underlying QUIC connections |
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `connected` | `boolean` | Whether `connect()` has succeeded |
+| `services` | `ServiceSummary[]` | Services discovered during admission |
+
+## Lower-level: createClient
+
+For tests and advanced use, `createClient` builds a typed stub over an existing transport. This is what `AsterClientWrapper.client()` uses internally.
+
+```typescript
+import { createClient } from '@aster-rpc/aster';
 
 const client = createClient(HelloService, transport);
-
-// Full type inference — client.sayHello() has correct parameter and return types
 const result = await client.sayHello(new HelloRequest({ name: "World" }));
-console.log(result.message); // "Hello, World!"
 ```
 
 ### Signature
@@ -94,24 +133,6 @@ await channel.close();
 for await (const reply of channel) {
   console.log(reply);
 }
-```
-
-## AsterClientWrapper
-
-The high-level client wrapper for production use:
-
-```typescript
-import { AsterClientWrapper } from '@aster-rpc/aster';
-
-const client = new AsterClientWrapper({
-  transport: myTransport,
-  config: { logFormat: 'json' },
-});
-
-const echo = client.service(HelloService);
-const result = await echo.sayHello(new HelloRequest({ name: "World" }));
-
-await client.close();
 ```
 
 ## Transport implementations
