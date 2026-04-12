@@ -16,6 +16,13 @@ import LanguageTabs, {TabItem} from '@site/src/components/LanguageTabs';
 >
 > Or: you write one file and run it.
 
+:::tip Don't want to follow along? Skip to the code.
+The complete, working source for every chapter in this guide lives in the main repo. Clone, run, read.
+
+- **Python:** [examples/python/mission_control](https://github.com/aster-rpc/aster-rpc/tree/main/examples/python/mission_control)
+- **TypeScript:** [examples/typescript/missionControl](https://github.com/aster-rpc/aster-rpc/tree/main/examples/typescript/missionControl)
+:::
+
 <LanguageTabs>
 <TabItem value="python">
 
@@ -197,10 +204,11 @@ if __name__ == "__main__":
 ```bash
 # Start the control plane
 python control.py
-# → aster1Qm...
+# → aster1Qmxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#   ^^^^^^^ this is your control plane's public-key address — copy it for the next step
 ```
 
-In another terminal, connect and inspect:
+In another terminal, connect and inspect. **Replace `aster1Qm...` below with the address your `control.py` just printed** (the address is unique to each run; it's an ephemeral key in dev mode):
 
 ```bash
 aster shell aster1Qm...
@@ -254,10 +262,11 @@ main();
 ```bash
 # Start the control plane
 bun run control.ts
-# → aster1Qm...
+# → aster1Qmxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#   ^^^^^^^ this is your control plane's public-key address — copy it for the next step
 ```
 
-In another terminal, connect and inspect:
+In another terminal, connect and inspect. **Replace `aster1Qm...` below with the address your `control.ts` just printed** (the address is unique to each run; it's an ephemeral key in dev mode):
 
 ```bash
 aster shell aster1Qm...
@@ -268,10 +277,18 @@ aster shell aster1Qm...
 </TabItem>
 </LanguageTabs>
 
-Or skip the shell entirely — call it straight from the command line:
+Or skip the shell entirely — call it straight from the command line. Replace `aster1Qm...` with your address:
 
 ```bash
+# macOS / Linux
 aster call aster1Qm... MissionControl.getStatus '{"agent_id": "edge-node-7"}'
+```
+
+```powershell
+# Windows (PowerShell). The --% operator tells PowerShell to stop parsing
+# and pass the rest of the line verbatim — necessary because PowerShell's
+# argument parser strips quotes from JSON arguments otherwise.
+aster call aster1Qm... MissionControl.getStatus --% {"agent_id": "edge-node-7"}
 ```
 
 > **`aster shell` vs `aster call`:** Use `aster shell` for interactive
@@ -295,18 +312,33 @@ aster call aster1Qm... MissionControl.getStatus '{"agent_id": "edge-node-7"}'
 **Goal:** Agents push logs into the control plane. Operators tail them
 in real time using server streaming.
 
+This chapter extends `control.py` (or `control.ts`) with two new methods: `submitLog` (a unary RPC) and `tailLogs` (a server-streaming RPC). To save you from puzzling over which lines go where, the full updated file is below — replace your existing `control.py` / `control.ts` with it.
+
 <LanguageTabs>
 <TabItem value="python">
 
+Replace your `control.py` with this complete version:
+
 ```python
+# control.py
+import asyncio
 from collections.abc import AsyncIterator
-from aster import server_stream
+from dataclasses import dataclass
+from aster import AsterServer, service, rpc, server_stream, wire_type
 
-# Ordered severity used by the level filter below.
-_LEVEL_ORDER = {"debug": 0, "info": 1, "warn": 2, "error": 3, "fatal": 4}
+# ─────────────── Wire types ───────────────
 
-def _level_rank(level: str) -> int:
-    return _LEVEL_ORDER.get(level.lower(), 0)
+@wire_type("mission/StatusRequest")
+@dataclass
+class StatusRequest:
+    agent_id: str = ""
+
+@wire_type("mission/StatusResponse")
+@dataclass
+class StatusResponse:
+    agent_id: str = ""
+    status: str = "idle"
+    uptime_secs: int = 0
 
 @wire_type("mission/LogEntry")
 @dataclass
@@ -325,19 +357,35 @@ class SubmitLogResult:
 @dataclass
 class TailRequest:
     agent_id: str = ""
-    level: str = "info"    # minimum level filter
+    level: str = "info"  # minimum level filter
+
+# ─────────────── Helpers ───────────────
+
+_LEVEL_ORDER = {"debug": 0, "info": 1, "warn": 2, "error": 3, "fatal": 4}
+
+def _level_rank(level: str) -> int:
+    return _LEVEL_ORDER.get(level.lower(), 0)
+
+# ─────────────── Service ───────────────
 
 @service(name="MissionControl", version=1)
 class MissionControl:
     def __init__(self):
-        self._log_queue = asyncio.Queue()
+        self._log_queue: asyncio.Queue[LogEntry] = asyncio.Queue()
 
-    # ... getStatus from Chapter 1 ...
+    @rpc()
+    async def getStatus(self, req: StatusRequest) -> StatusResponse:
+        return StatusResponse(
+            agent_id=req.agent_id,
+            status="running",
+            uptime_secs=3600,
+        )
 
     @rpc()
     async def submitLog(self, entry: LogEntry) -> SubmitLogResult:
         """Agents call this to push log entries."""
         await self._log_queue.put(entry)
+        return SubmitLogResult(accepted=True)
 
     @server_stream()
     async def tailLogs(self, req: TailRequest) -> AsyncIterator[LogEntry]:
@@ -349,20 +397,52 @@ class MissionControl:
             if _level_rank(entry.level) < _level_rank(req.level):
                 continue
             yield entry
+
+# ─────────────── Main ───────────────
+
+async def main():
+    async with AsterServer(services=[MissionControl()]) as srv:
+        print(srv.address)  # compact aster1... address
+        await srv.serve()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
+
+**Restart the service.** Stop the previous run with `Ctrl+C`, then start the new version:
+
+```bash
+python control.py
+# → aster1Qmxxxxxxxx... ← this is a NEW address; the old one is gone
+```
+
+The address changes on every restart in dev mode (it's an ephemeral key). Copy the new address — you'll need it for both terminals below.
 
 </TabItem>
 <TabItem value="typescript">
 
-```typescript
-import { ServerStream } from '@aster-rpc/aster';
+Replace your `control.ts` with this complete version:
 
-// Ordered severity used by the level filter below.
-const LEVEL_ORDER: Record<string, number> = {
-    debug: 0, info: 1, warn: 2, error: 3, fatal: 4,
-};
-function levelRank(level: string): number {
-    return LEVEL_ORDER[level.toLowerCase()] ?? 0;
+```typescript
+// control.ts
+import {
+    AsterServer, Service, Rpc, ServerStream, WireType,
+} from '@aster-rpc/aster';
+
+// ─────────────── Wire types ───────────────
+
+@WireType("mission/StatusRequest")
+class StatusRequest {
+    agent_id: string = "";
+    constructor(init?: Partial<StatusRequest>) { if (init) Object.assign(this, init); }
+}
+
+@WireType("mission/StatusResponse")
+class StatusResponse {
+    agent_id: string = "";
+    status: string = "idle";
+    uptime_secs: number = 0;
+    constructor(init?: Partial<StatusResponse>) { if (init) Object.assign(this, init); }
 }
 
 @WireType("mission/LogEntry")
@@ -387,12 +467,30 @@ class TailRequest {
     constructor(init?: Partial<TailRequest>) { if (init) Object.assign(this, init); }
 }
 
+// ─────────────── Helpers ───────────────
+
+const LEVEL_ORDER: Record<string, number> = {
+    debug: 0, info: 1, warn: 2, error: 3, fatal: 4,
+};
+function levelRank(level: string): number {
+    return LEVEL_ORDER[level.toLowerCase()] ?? 0;
+}
+
+// ─────────────── Service ───────────────
+
 @Service({ name: "MissionControl", version: 1 })
 class MissionControl {
     private _logBuffer: LogEntry[] = [];
     private _logResolve: ((entry: LogEntry) => void) | null = null;
 
-    // ... getStatus from Chapter 1 ...
+    @Rpc()
+    async getStatus(req: StatusRequest): Promise<StatusResponse> {
+        return new StatusResponse({
+            agent_id: req.agent_id,
+            status: "running",
+            uptime_secs: 3600,
+        });
+    }
 
     @Rpc()
     async submitLog(entry: LogEntry): Promise<SubmitLogResult> {
@@ -417,18 +515,141 @@ class MissionControl {
         }
     }
 }
+
+// ─────────────── Main ───────────────
+
+async function main() {
+    const server = new AsterServer({ services: [new MissionControl()] });
+    await server.start();
+    console.log(server.address);  // compact aster1... address
+    await server.serve();
+}
+
+main();
+```
+
+**Restart the service.** Stop the previous run with `Ctrl+C`, then start the new version:
+
+```bash
+bun run control.ts
+# → aster1Qmxxxxxxxx... ← this is a NEW address; the old one is gone
+```
+
+The address changes on every restart in dev mode (it's an ephemeral key). Copy the new address — you'll need it for both terminals below.
+
+</TabItem>
+</LanguageTabs>
+
+### Submit some logs to stream
+
+`tailLogs` blocks until log entries arrive. For the demo we need a process that's actively pushing logs, so the stream has something to show. Save this as `logs.py` (or `logs.ts`) and run it in a **second terminal**:
+
+<LanguageTabs>
+<TabItem value="python">
+
+```python
+# logs.py — submits one log entry per second so tailLogs has something to stream.
+# Usage: python logs.py <aster1...address>
+import asyncio
+import sys
+import time
+from aster import AsterClient
+
+async def main():
+    if len(sys.argv) < 2:
+        print("Usage: python logs.py <aster1...address>")
+        sys.exit(1)
+
+    async with AsterClient(address=sys.argv[1]) as client:
+        mc = client.proxy("MissionControl")
+
+        levels = ["info", "warn", "error"]
+        messages = ["disk 92% full", "health check failed", "cpu spike detected"]
+
+        i = 0
+        while True:
+            await mc.submitLog({
+                "timestamp": time.time(),
+                "level": levels[i % len(levels)],
+                "message": messages[i % len(messages)],
+                "agent_id": "edge-node-7",
+            })
+            print(f"submitted log #{i + 1}")
+            i += 1
+            await asyncio.sleep(1)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```bash
+# Replace aster1Qm... with the address from control.py
+python logs.py aster1Qm...
+```
+
+</TabItem>
+<TabItem value="typescript">
+
+```typescript
+// logs.ts — submits one log entry per second so tailLogs has something to stream.
+// Usage: bun run logs.ts <aster1...address>
+import { AsterClientWrapper } from '@aster-rpc/aster';
+
+async function main() {
+    const address = process.argv[2];
+    if (!address) {
+        console.error("Usage: bun run logs.ts <aster1...address>");
+        process.exit(1);
+    }
+
+    const client = new AsterClientWrapper({ address });
+    await client.connect();
+    const mc = client.proxy("MissionControl");
+
+    const levels = ["info", "warn", "error"];
+    const messages = ["disk 92% full", "health check failed", "cpu spike detected"];
+
+    let i = 0;
+    while (true) {
+        await mc.submitLog({
+            timestamp: Date.now() / 1000,
+            level: levels[i % levels.length],
+            message: messages[i % messages.length],
+            agent_id: "edge-node-7",
+        });
+        console.log(`submitted log #${i + 1}`);
+        i++;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+}
+
+main();
+```
+
+```bash
+# Replace aster1Qm... with the address from control.ts
+bun run logs.ts aster1Qm...
 ```
 
 </TabItem>
 </LanguageTabs>
 
+### Tail the stream
+
+In a **third terminal**, open the shell and start tailing. Replace `aster1Qm...` with the same address as before:
+
 ```bash
-# In the shell:
+aster shell aster1Qm...
+> cd services/MissionControl
 > ./tailLogs agent_id="edge-node-7" level="warn"
 #0 {"timestamp": 1712567890.1, "level": "warn", "message": "disk 92% full", ...}
 #1 {"timestamp": 1712567891.3, "level": "error", "message": "health check failed", ...}
 # Ctrl+C to stop
 ```
+
+You should see entries scroll past in real time as `logs.py` submits them. Note the `level="warn"` filter excludes `info` entries, so you'll see roughly two out of every three submitted logs.
+
+> **Three terminals?** Yes — server (`control.py`), submitter (`logs.py`), and tail consumer (`aster shell`). That's the natural shape of any streaming demo: someone produces, someone consumes, the server brokers between them.
 
 Or from your own code using the proxy client:
 

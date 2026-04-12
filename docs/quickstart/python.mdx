@@ -4,12 +4,12 @@ title: Quickstart
 sidebar_label: "60-second quickstart"
 slug: /quickstart/python
 sidebar_position: 1
-description: Get a working Aster RPC service running in under two minutes.
+description: Write a service on one machine, call it from another -- even if they're on different networks. In under two minutes.
 ---
 
 import LanguageTabs, {TabItem} from '@site/src/components/LanguageTabs';
 
-Get a working Aster RPC service running in under two minutes.
+Write a service on one machine, call it from another -- even if they're on different networks, behind firewalls, with no shared infrastructure between them. In under two minutes.
 
 ## Prerequisites
 
@@ -58,6 +58,8 @@ npm install @aster-rpc/aster
 </LanguageTabs>
 
 ## Define a service
+
+A **service** is a class that exposes one or more methods callable by remote consumers. You write it like a regular class; Aster handles the wire format, transport, and remote dispatch.
 
 <LanguageTabs defaultValue="python">
 <TabItem value="python" label="Python">
@@ -183,6 +185,10 @@ In dev mode (no `ASTER_*` environment variables set), the server:
 
 ## Run a consumer
 
+A **consumer** is the node that calls into a producer's services. Consumers don't need access to the service's source code -- they discover methods from the producer's published contract at runtime, then call them by name.
+
+The producer and consumer don't have to live on the same machine, or even the same network. Your producer might be in a cloud environment behind a corporate firewall; your consumer might be on your laptop on coffee shop Wi-Fi, or on a Raspberry Pi behind your home router, or on a phone tethered to a 5G connection. No VPN to set up, no firewall rule to add, no port to forward, no DNS entry to register. The address the consumer uses is the producer's public key -- Aster figures out the network path between them, direct if it can and relayed if it has to.
+
 <LanguageTabs defaultValue="python">
 <TabItem value="python" label="Python">
 
@@ -190,15 +196,16 @@ Create `consumer.py`:
 
 ```python
 import asyncio
-from hello_service import HelloService, HelloRequest
 from aster import AsterClient
 
 
 async def main():
     async with AsterClient() as c:
-        hello = await c.client(HelloService)
-        resp = await hello.say_hello(HelloRequest(name="World"))
-        print(resp.message)  # Hello, World!
+        # The dynamic proxy speaks JSON and needs no local type definitions --
+        # methods are discovered from the producer's published contract.
+        hello = c.proxy("HelloService")
+        resp = await hello.say_hello({"name": "World"})
+        print(resp["message"])  # Hello, World!
 
 
 asyncio.run(main())
@@ -207,10 +214,16 @@ asyncio.run(main())
 Run it, passing the producer's address:
 
 ```bash
+# macOS / Linux
 ASTER_ENDPOINT_ADDR=<paste from producer output> python consumer.py
 ```
 
-`AsterClient` reads `ASTER_ENDPOINT_ADDR` from the environment, connects to the producer's admission endpoint (to discover available services), then opens an RPC connection. `c.client(HelloService)` returns a typed client stub -- call methods on it like regular async functions.
+```powershell
+# Windows (PowerShell)
+$env:ASTER_ENDPOINT_ADDR="<paste from producer output>"; python consumer.py
+```
+
+`AsterClient` reads `ASTER_ENDPOINT_ADDR` from the environment and connects to the producer. `c.proxy("HelloService")` returns a dynamic stub -- call methods on it like regular async functions. If you'd rather have typed classes (for IDE autocomplete and static checking), share the service definition module between producer and consumer and use `c.client(HelloService)` instead -- see [Defining Services and Types](/docs/guides/services).
 
 </TabItem>
 <TabItem value="typescript" label="TypeScript">
@@ -237,93 +250,30 @@ await client.close();
 Run it, passing the producer's address:
 
 ```bash
+# macOS / Linux
 ASTER_ENDPOINT_ADDR=<paste from producer output> bun run consumer.ts
 ```
 
-</TabItem>
-</LanguageTabs>
-
-## Dev mode vs production
-
-The quickstart above runs in **dev mode** -- ephemeral keys, open gates, no credential files. Everything works out of the box for local development.
-
-In **production**, you use the CLI to manage trust and enroll nodes:
-
-```bash
-# Operator's machine (one time):
-aster keygen root
-#   -> ~/.aster/root.key (private -- keep secret)
-#   -> ~/.aster/root.pub (public -- share with nodes)
-
-# Enroll this node as a producer:
-aster enroll node --role producer --name hello-producer
-#   -> generates node key + signs credential -> writes .aster-identity
-
-# Enroll the same node as a consumer:
-aster enroll node --role consumer --name hello-consumer
-#   -> adds a consumer peer entry to the same .aster-identity
-```
-
-Then deploy the `.aster-identity` file alongside your code:
-
-<LanguageTabs defaultValue="python">
-<TabItem value="python" label="Python">
-
-```python
-# producer.py -- loads node key + producer credential from .aster-identity
-async with AsterServer(services=[HelloService()], identity=".aster-identity", peer="hello-producer") as srv:
-    print(srv.address)
-    await srv.serve()
-
-# consumer.py -- loads consumer credential from .aster-identity
-async with AsterClient(identity=".aster-identity", peer="hello-consumer") as c:
-    hello = await c.client(HelloService)
-    resp = await hello.say_hello(HelloRequest(name="World"))
-```
-
-```bash
-# Consumer still needs to know where the producer is:
-ASTER_ENDPOINT_ADDR=<producer addr> python consumer.py
-```
-
-</TabItem>
-<TabItem value="typescript" label="TypeScript">
-
-```typescript
-// producer.ts -- loads node key + producer credential from .aster-identity
-const server = new AsterServer({
-  services: [new HelloService()],
-  identity: ".aster-identity",
-  peer: "hello-producer",
-});
-await server.start();
-console.log(server.address);
-await server.serve();
-
-// consumer.ts -- loads consumer credential from .aster-identity
-const client = new AsterClientWrapper({
-  identity: ".aster-identity",
-  peer: "hello-consumer",
-  address: process.env.ASTER_ENDPOINT_ADDR!,
-});
-await client.connect();
-```
-
-```bash
-# Consumer still needs to know where the producer is:
-ASTER_ENDPOINT_ADDR=<producer addr> bun run consumer.ts
+```powershell
+# Windows (PowerShell)
+$env:ASTER_ENDPOINT_ADDR="<paste from producer output>"; bun run consumer.ts
 ```
 
 </TabItem>
 </LanguageTabs>
 
-Here we enroll the same node as both producer and consumer. In practice, producers and consumers are often separate nodes -- see *Understanding the .aster-identity file (coming soon)*.
+## What just happened
 
-See [Configuration](/docs/reference/configuration) for the full list of environment variables and TOML settings, and [Trust and admission](/docs/concepts/trust-model) for the security model.
+Three steps, three things to notice:
+
+1. **The producer is a server process holding `HelloService`.** When it starts, it prints an `aster1...` address. That address is the node's public key, not a hostname or an IP -- it's stable, globally unique, and can't be impersonated.
+
+2. **The consumer connects by that public key.** No DNS lookup, no port forwarding, no certificate to trust. The consumer doesn't even need a copy of the service source code -- it asks the producer what methods exist and builds a stub at runtime.
+
+3. **The producer and consumer don't have to be on the same machine, or even the same network.** In this quickstart they're both on your laptop because that's the simplest demo. But the address is a public key, so you can run the producer on your homelab, your VPS, or a Raspberry Pi behind your home router, and call it from your laptop on coffee shop Wi-Fi without changing a single line of code. Aster handles NAT traversal and chooses the best network path -- direct if it can, relayed if it has to.
+
+To try this for real, run `producer.py` on one machine and `consumer.py` on another. Copy the `aster1...` address from the producer's output, paste it into the consumer's `ASTER_ENDPOINT_ADDR`, and the call will arrive over whatever network path actually exists between the two machines. No tunnels, no proxies, no shared secrets.
 
 ## What's next
 
-- [Defining services and types](/docs/guides/services) -- streaming RPCs, `@wire_type`, contract identity.
-- [Configuration](/docs/reference/configuration) -- `AsterConfig`, TOML files, environment variables.
-- [Trust and admission](/docs/concepts/trust-model) -- root keys, enrollment credentials, the Gate model.
-- [Observability](/docs/guides/observability) -- structured logging, OTel metrics, health endpoints.
+Build a real service end-to-end with the **[Mission Control walkthrough](/docs/quickstart/mission-control)** -- 30 minutes, six chapters, four streaming patterns, capability-scoped auth, cross-language interop, and a working MCP agent demo at the end.
