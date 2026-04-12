@@ -690,10 +690,6 @@ The proxy uses a different call form per RPC pattern, mirroring what each one ac
 | Bidi stream | `ch = mc.runCommand.bidi(); await ch.open(); ...` | `const ch = mc.runCommand.bidi(); await ch.open(); ...` |
 :::
 
-> **Tip:** `tailLogs` blocks until a log entry arrives. Submit a log from
-> another terminal (`aster call ... MissionControl.submitLog '{"message":"test"}'`)
-> to see it appear. Press Ctrl+C to stop.
-
 **What just happened:**
 - `@server_stream` / `@ServerStream` turns an async generator into a streaming RPC
 - The client receives items as they're yielded — no polling, no websockets
@@ -706,10 +702,137 @@ The proxy uses a different call form per RPC pattern, mirroring what each one ac
 **Goal:** Agents push thousands of metric datapoints per second using
 client streaming.
 
+This chapter adds two new wire types (`MetricPoint`, `IngestResult`) and one new method (`ingestMetrics`) to your control plane. Add the wire types alongside the existing types and the method inside `MissionControl`. The full updated file is at the end of the chapter if you'd rather copy-paste.
+
 <LanguageTabs>
 <TabItem value="python">
 
+New wire types (add these alongside `LogEntry`, `TailRequest`, etc.):
+
 ```python
+from dataclasses import field
+
+@wire_type("mission/MetricPoint")
+@dataclass
+class MetricPoint:
+    name: str = ""
+    value: float = 0.0
+    timestamp: float = 0.0
+    tags: dict = field(default_factory=dict)
+
+@wire_type("mission/IngestResult")
+@dataclass
+class IngestResult:
+    accepted: int = 0
+    dropped: int = 0
+```
+
+New method on `MissionControl` (add inside the class, alongside `getStatus`/`submitLog`/`tailLogs`):
+
+```python
+@client_stream()
+async def ingestMetrics(self, stream: AsyncIterator[MetricPoint]) -> IngestResult:
+    """Receive a stream of metric points from an agent."""
+    accepted = 0
+    async for point in stream:
+        # Store, forward, aggregate — whatever you need.
+        accepted += 1
+    return IngestResult(accepted=accepted)
+```
+
+Don't forget to import `client_stream` at the top:
+
+```python
+from aster import AsterServer, service, rpc, server_stream, client_stream, wire_type
+```
+
+**Restart `control.py`** (`Ctrl+C` then `python control.py`) and copy the new address.
+
+Save this as `metrics.py` in a **second terminal** to push 10,000 metric points:
+
+```python
+# metrics.py — streams 10,000 metric points to MissionControl.
+# Usage: python metrics.py <aster1...address>
+import asyncio
+import random
+import sys
+import time
+from aster import AsterClient
+
+async def main():
+    if len(sys.argv) < 2:
+        print("Usage: python metrics.py <aster1...address>")
+        sys.exit(1)
+
+    async with AsterClient(address=sys.argv[1]) as client:
+        mc = client.proxy("MissionControl")
+
+        async def metrics():
+            for i in range(10_000):
+                yield {
+                    "name": "cpu.usage",
+                    "value": random.random(),
+                    "timestamp": time.time(),
+                }
+
+        result = await mc.ingestMetrics(metrics())
+        print(f"Accepted: {result['accepted']}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```bash
+# Replace aster1Qm... with the address from control.py
+python metrics.py aster1Qm...
+# → Accepted: 10000
+```
+
+<details>
+<summary><strong>Full <code>control.py</code> as of Chapter 3</strong></summary>
+
+```python
+# control.py
+import asyncio
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from aster import (
+    AsterServer, service, rpc, server_stream, client_stream, wire_type,
+)
+
+# ─────────────── Wire types ───────────────
+
+@wire_type("mission/StatusRequest")
+@dataclass
+class StatusRequest:
+    agent_id: str = ""
+
+@wire_type("mission/StatusResponse")
+@dataclass
+class StatusResponse:
+    agent_id: str = ""
+    status: str = "idle"
+    uptime_secs: int = 0
+
+@wire_type("mission/LogEntry")
+@dataclass
+class LogEntry:
+    timestamp: float = 0.0
+    level: str = "info"
+    message: str = ""
+    agent_id: str = ""
+
+@wire_type("mission/SubmitLogResult")
+@dataclass
+class SubmitLogResult:
+    accepted: bool = True
+
+@wire_type("mission/TailRequest")
+@dataclass
+class TailRequest:
+    agent_id: str = ""
+    level: str = "info"
+
 @wire_type("mission/MetricPoint")
 @dataclass
 class MetricPoint:
@@ -724,54 +847,69 @@ class IngestResult:
     accepted: int = 0
     dropped: int = 0
 
+# ─────────────── Helpers ───────────────
+
+_LEVEL_ORDER = {"debug": 0, "info": 1, "warn": 2, "error": 3, "fatal": 4}
+
+def _level_rank(level: str) -> int:
+    return _LEVEL_ORDER.get(level.lower(), 0)
+
+# ─────────────── Service ───────────────
+
 @service(name="MissionControl", version=1)
 class MissionControl:
-    # ... previous methods ...
+    def __init__(self):
+        self._log_queue: asyncio.Queue[LogEntry] = asyncio.Queue()
+
+    @rpc()
+    async def getStatus(self, req: StatusRequest) -> StatusResponse:
+        return StatusResponse(
+            agent_id=req.agent_id,
+            status="running",
+            uptime_secs=3600,
+        )
+
+    @rpc()
+    async def submitLog(self, entry: LogEntry) -> SubmitLogResult:
+        await self._log_queue.put(entry)
+        return SubmitLogResult(accepted=True)
+
+    @server_stream()
+    async def tailLogs(self, req: TailRequest) -> AsyncIterator[LogEntry]:
+        while True:
+            entry = await self._log_queue.get()
+            if req.agent_id and entry.agent_id != req.agent_id:
+                continue
+            if _level_rank(entry.level) < _level_rank(req.level):
+                continue
+            yield entry
 
     @client_stream()
     async def ingestMetrics(self, stream: AsyncIterator[MetricPoint]) -> IngestResult:
-        """Receive a stream of metric points from an agent."""
         accepted = 0
         async for point in stream:
-            self._store_metric(point)
             accepted += 1
         return IngestResult(accepted=accepted)
-```
 
-On the agent side, use a **proxy client** — quick to set up,
-no types needed on the consumer side:
-
-```python
-# agent.py — proxy client (good for prototyping)
-import asyncio
-from aster import AsterClient
+# ─────────────── Main ───────────────
 
 async def main():
-    client = AsterClient(address="aster1Qm...")
-    await client.connect()
-    mc = client.proxy("MissionControl")
+    async with AsterServer(services=[MissionControl()]) as srv:
+        print(srv.address)
+        await srv.serve()
 
-    # Stream 10,000 metrics — the proxy accepts dicts
-    async def metrics():
-        for i in range(10_000):
-            from random import random
-            from time import time
-            yield {"name": "cpu.usage", "value": random(), "timestamp": time()}
-
-    result = await mc.ingestMetrics(metrics())
-    print(f"Accepted: {result['accepted']}")
-
-    await client.close()
-
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
+
+</details>
 
 </TabItem>
 <TabItem value="typescript">
 
-```typescript
-import { ClientStream } from '@aster-rpc/aster';
+New wire types (add these alongside `LogEntry`, `TailRequest`, etc.):
 
+```typescript
 @WireType("mission/MetricPoint")
 class MetricPoint {
     name: string = "";
@@ -787,36 +925,49 @@ class IngestResult {
     dropped: number = 0;
     constructor(init?: Partial<IngestResult>) { if (init) Object.assign(this, init); }
 }
+```
 
-@Service({ name: "MissionControl", version: 1 })
-class MissionControl {
-    // ... previous methods ...
+New method on `MissionControl` (add inside the class, alongside `getStatus`/`submitLog`/`tailLogs`):
 
-    @ClientStream()
-    async ingestMetrics(stream: AsyncIterable<MetricPoint>): Promise<IngestResult> {
-        let accepted = 0;
-        for await (const point of stream) {
-            this.storeMetric(point);
-            accepted += 1;
-        }
-        return new IngestResult({ accepted });
+```typescript
+@ClientStream()
+async ingestMetrics(stream: AsyncIterable<MetricPoint>): Promise<IngestResult> {
+    let accepted = 0;
+    for await (const point of stream) {
+        accepted += 1;
     }
+    return new IngestResult({ accepted });
 }
 ```
 
-On the agent side, use a **proxy client** — quick to set up,
-no types needed on the consumer side:
+Don't forget to add `ClientStream` to your imports at the top:
 
 ```typescript
-// agent.ts — proxy client (good for prototyping)
+import {
+    AsterServer, Service, Rpc, ServerStream, ClientStream, WireType,
+} from '@aster-rpc/aster';
+```
+
+**Restart `control.ts`** (`Ctrl+C` then `bun run control.ts`) and copy the new address.
+
+Save this as `metrics.ts` in a **second terminal** to push 10,000 metric points:
+
+```typescript
+// metrics.ts — streams 10,000 metric points to MissionControl.
+// Usage: bun run metrics.ts <aster1...address>
 import { AsterClientWrapper } from '@aster-rpc/aster';
 
 async function main() {
-    const client = new AsterClientWrapper({ address: "aster1Qm..." });
+    const address = process.argv[2];
+    if (!address) {
+        console.error("Usage: bun run metrics.ts <aster1...address>");
+        process.exit(1);
+    }
+
+    const client = new AsterClientWrapper({ address });
     await client.connect();
     const mc = client.proxy("MissionControl");
 
-    // Stream 10,000 metrics — the proxy accepts plain objects
     async function* metrics() {
         for (let i = 0; i < 10_000; i++) {
             yield { name: "cpu.usage", value: Math.random(), timestamp: Date.now() / 1000 };
@@ -825,12 +976,24 @@ async function main() {
 
     const result = await mc.ingestMetrics(metrics());
     console.log(`Accepted: ${(result as any).accepted}`);
-
     await client.close();
 }
 
 main();
 ```
+
+```bash
+# Replace aster1Qm... with the address from control.ts
+bun run metrics.ts aster1Qm...
+# → Accepted: 10000
+```
+
+<details>
+<summary><strong>Full <code>control.ts</code> as of Chapter 3</strong> — see the <a href="https://github.com/aster-rpc/aster-rpc/tree/main/examples/typescript/missionControl">examples repo</a> for the complete version</summary>
+
+The full file extends Chapter 2's `control.ts` with the `MetricPoint`, `IngestResult` types and the `ingestMetrics` method. Add `ClientStream` to your imports and the method body shown above to your `MissionControl` class. Everything else stays the same.
+
+</details>
 
 </TabItem>
 </LanguageTabs>
@@ -855,10 +1018,14 @@ execute commands. This is where per-agent state and bidi streaming meet.
 
 `MissionControl` is a shared service — one instance, all clients see the
 same state. But each agent needs its own identity, capabilities, and
-command channel. That's a session-scoped service:
+command channel. That's a session-scoped service.
+
+This chapter adds a brand-new class — `AgentSession` — alongside `MissionControl` in the same `control.py` / `control.ts` file. Crucially, you'll also need to **add `AgentSession()` to your server's `services=[...]` list**, otherwise it won't be reachable. The full file is at the end of the chapter.
 
 <LanguageTabs>
 <TabItem value="python">
+
+Add these wire types alongside the existing ones:
 
 ```python
 @wire_type("mission/Heartbeat")
@@ -885,7 +1052,11 @@ class CommandResult:
     stdout: str = ""
     stderr: str = ""
     exit_code: int = -1
+```
 
+Add this **new class** anywhere below `MissionControl` in `control.py`:
+
+```python
 @service(name="AgentSession", version=1, scoped="session")
 class AgentSession:
     """Session-scoped: one instance per connected agent."""
@@ -920,12 +1091,31 @@ class AgentSession:
             )
 ```
 
+Add `bidi_stream` to your imports and **register the new service** in `main()`:
+
+```python
+from aster import (
+    AsterServer, service, rpc, server_stream, client_stream, bidi_stream, wire_type,
+)
+
+# ...
+
+async def main():
+    async with AsterServer(services=[MissionControl(), AgentSession()]) as srv:
+        #                              ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+        #                              shared           session-scoped
+        print(srv.address)
+        await srv.serve()
+```
+
+**Restart `control.py`** and copy the new address.
+
 </TabItem>
 <TabItem value="typescript">
 
-```typescript
-import { BidiStream } from '@aster-rpc/aster';
+Add these wire types alongside the existing ones:
 
+```typescript
 @WireType("mission/Heartbeat")
 class Heartbeat {
     agent_id: string = "";
@@ -954,7 +1144,11 @@ class CommandResult {
     exit_code: number = -1;
     constructor(init?: Partial<CommandResult>) { if (init) Object.assign(this, init); }
 }
+```
 
+Add this **new class** anywhere below `MissionControl` in `control.ts`:
+
+```typescript
 @Service({ name: "AgentSession", version: 1, scoped: "session" })
 class AgentSession {
     private _agent_id: string = "";
@@ -985,8 +1179,28 @@ class AgentSession {
 }
 ```
 
+Add `BidiStream` to your imports and **register the new service** in `main()`:
+
+```typescript
+import {
+    AsterServer, Service, Rpc, ServerStream, ClientStream, BidiStream, WireType,
+} from '@aster-rpc/aster';
+
+// ...
+
+const server = new AsterServer({
+    services: [new MissionControl(), new AgentSession()],
+    //          ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^
+    //          shared               session-scoped
+});
+```
+
+**Restart `control.ts`** and copy the new address.
+
 </TabItem>
 </LanguageTabs>
+
+Now connect with the operator CLI. Replace `aster1Qm...` with the address your `control.py` / `control.ts` just printed:
 
 ```bash
 # Operator connects and opens a session subshell:
@@ -1010,6 +1224,173 @@ AgentSession~ end
 > between them. The `session` command opens one persistent session and
 > routes every method through it. The `AgentSession~` prompt makes it
 > obvious you're inside a stateful session. Type `end` to close it.
+
+<details>
+<summary><strong>Full <code>control.py</code> as of Chapter 4</strong> — for the TypeScript equivalent see the <a href="https://github.com/aster-rpc/aster-rpc/tree/main/examples/typescript/missionControl">examples repo</a></summary>
+
+```python
+# control.py
+import asyncio
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from aster import (
+    AsterServer, service, rpc, server_stream, client_stream, bidi_stream, wire_type,
+)
+
+# ─────────────── Wire types ───────────────
+
+@wire_type("mission/StatusRequest")
+@dataclass
+class StatusRequest:
+    agent_id: str = ""
+
+@wire_type("mission/StatusResponse")
+@dataclass
+class StatusResponse:
+    agent_id: str = ""
+    status: str = "idle"
+    uptime_secs: int = 0
+
+@wire_type("mission/LogEntry")
+@dataclass
+class LogEntry:
+    timestamp: float = 0.0
+    level: str = "info"
+    message: str = ""
+    agent_id: str = ""
+
+@wire_type("mission/SubmitLogResult")
+@dataclass
+class SubmitLogResult:
+    accepted: bool = True
+
+@wire_type("mission/TailRequest")
+@dataclass
+class TailRequest:
+    agent_id: str = ""
+    level: str = "info"
+
+@wire_type("mission/MetricPoint")
+@dataclass
+class MetricPoint:
+    name: str = ""
+    value: float = 0.0
+    timestamp: float = 0.0
+    tags: dict = field(default_factory=dict)
+
+@wire_type("mission/IngestResult")
+@dataclass
+class IngestResult:
+    accepted: int = 0
+    dropped: int = 0
+
+@wire_type("mission/Heartbeat")
+@dataclass
+class Heartbeat:
+    agent_id: str = ""
+    capabilities: list = field(default_factory=list)
+    load_avg: float = 0.0
+
+@wire_type("mission/Assignment")
+@dataclass
+class Assignment:
+    task_id: str = ""
+    command: str = ""
+
+@wire_type("mission/Command")
+@dataclass
+class Command:
+    command: str = ""
+
+@wire_type("mission/CommandResult")
+@dataclass
+class CommandResult:
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = -1
+
+# ─────────────── Helpers ───────────────
+
+_LEVEL_ORDER = {"debug": 0, "info": 1, "warn": 2, "error": 3, "fatal": 4}
+
+def _level_rank(level: str) -> int:
+    return _LEVEL_ORDER.get(level.lower(), 0)
+
+# ─────────────── Services ───────────────
+
+@service(name="MissionControl", version=1)
+class MissionControl:
+    def __init__(self):
+        self._log_queue: asyncio.Queue[LogEntry] = asyncio.Queue()
+
+    @rpc()
+    async def getStatus(self, req: StatusRequest) -> StatusResponse:
+        return StatusResponse(agent_id=req.agent_id, status="running", uptime_secs=3600)
+
+    @rpc()
+    async def submitLog(self, entry: LogEntry) -> SubmitLogResult:
+        await self._log_queue.put(entry)
+        return SubmitLogResult(accepted=True)
+
+    @server_stream()
+    async def tailLogs(self, req: TailRequest) -> AsyncIterator[LogEntry]:
+        while True:
+            entry = await self._log_queue.get()
+            if req.agent_id and entry.agent_id != req.agent_id:
+                continue
+            if _level_rank(entry.level) < _level_rank(req.level):
+                continue
+            yield entry
+
+    @client_stream()
+    async def ingestMetrics(self, stream: AsyncIterator[MetricPoint]) -> IngestResult:
+        accepted = 0
+        async for point in stream:
+            accepted += 1
+        return IngestResult(accepted=accepted)
+
+@service(name="AgentSession", version=1, scoped="session")
+class AgentSession:
+    def __init__(self, peer: str | None = None):
+        self._peer = peer
+        self._agent_id = ""
+        self._capabilities = []
+
+    @rpc()
+    async def register(self, hb: Heartbeat) -> Assignment:
+        self._agent_id = hb.agent_id
+        self._capabilities = hb.capabilities
+        if "gpu" in hb.capabilities:
+            return Assignment(task_id="train-42", command="python train.py")
+        return Assignment(task_id="idle", command="sleep 60")
+
+    @bidi_stream()
+    async def runCommand(self, commands: AsyncIterator[Command]) -> AsyncIterator[CommandResult]:
+        async for cmd in commands:
+            proc = await asyncio.create_subprocess_shell(
+                cmd.command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            yield CommandResult(
+                stdout=stdout.decode(),
+                stderr=stderr.decode(),
+                exit_code=proc.returncode,
+            )
+
+# ─────────────── Main ───────────────
+
+async def main():
+    async with AsterServer(services=[MissionControl(), AgentSession()]) as srv:
+        print(srv.address)
+        await srv.serve()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</details>
 
 **What just happened:**
 - `scoped="session"` creates a fresh `AgentSession` per connection — each
@@ -1135,42 +1516,51 @@ class AgentSession {
 
 ### Step 3: Start the control plane with auth
 
+Update your `main()` to attach a config that points at the root public key and turns off open admission. You'll also pass an `identity` file path so the server has a stable endpoint id (without one, every restart gives you a new id and breaks any credentials you've issued).
+
 <LanguageTabs>
 <TabItem value="python">
 
 ```python
-config = AsterConfig(
-    root_pubkey_file="~/.aster/root.pub", # <- this is the owner's public key (i.e. yours)
-    allow_all_consumers=False,
-)
-async with AsterServer(
-    services=[MissionControl(), AgentSession()],
-    identity=".aster-identity", # <- this is the identity of the endpoint
-    config=config,
-) as srv:
-    print(srv.address)
-    await srv.serve()
+from aster import AsterConfig
+
+async def main():
+    config = AsterConfig(
+        root_pubkey_file="~/.aster/root.pub",  # owner's public key (yours)
+        allow_all_consumers=False,
+    )
+    async with AsterServer(
+        services=[MissionControl(), AgentSession()],
+        identity=".aster-identity",            # stable endpoint identity
+        config=config,
+    ) as srv:
+        print(srv.address)
+        await srv.serve()
 ```
 
 </TabItem>
 <TabItem value="typescript">
 
 ```typescript
-const server = new AsterServer({
-    services: [new MissionControl(), new AgentSession()],
-    identity: ".aster-identity", // <- this is the identity of the endpoint
-    config: {
-        rootPubkeyFile: "~/.aster/root.pub", // <- this is the owner's public key (i.e. yours)
-    },
-    allowAllConsumers: false,
-});
-await server.start();
-console.log(server.address);
-await server.serve();
+async function main() {
+    const server = new AsterServer({
+        services: [new MissionControl(), new AgentSession()],
+        identity: ".aster-identity",            // stable endpoint identity
+        config: {
+            rootPubkeyFile: "~/.aster/root.pub", // owner's public key (yours)
+        },
+        allowAllConsumers: false,
+    });
+    await server.start();
+    console.log(server.address);
+    await server.serve();
+}
 ```
 
 </TabItem>
 </LanguageTabs>
+
+**Restart `control.py` / `control.ts`** and copy the new address. Because you've now attached a stable `.aster-identity` file, this address will stay the same across restarts — and any credentials you issue against it will keep working.
 
 Each Aster endpoint will have its own identity (secret key pair) and it will have the public key of its owner (you) so it knows who administers it.
 
@@ -1247,12 +1637,14 @@ on success and exits non-zero on failure. Easy to parse from CI.
 
 ### Step 5: Connect with credentials
 
+Replace `aster1Qm...` in the snippets below with the address your `control.py` / `control.ts` printed in Step 3.
+
 <LanguageTabs>
 <TabItem value="python">
 
 ```python
 client = AsterClient(
-    address="aster1Qm...",
+    address="aster1Qm...",                    # ← from control.py output
     enrollment_credential_file="edge-node-7.cred",
 )
 await client.connect()
@@ -1268,7 +1660,7 @@ await mc.ingestMetrics(...)                   # ✓ has ops.ingest
 
 ```typescript
 const client = new AsterClientWrapper({
-    address: "aster1Qm...",
+    address: "aster1Qm...",                   // ← from control.ts output
     enrollmentCredentialFile: "edge-node-7.cred",
 });
 await client.connect();
@@ -1283,7 +1675,8 @@ await mc.ingestMetrics(...);                   // ✓ has ops.ingest
 </LanguageTabs>
 
 ```bash
-# Or from the CLI — the shell respects credentials too
+# Or from the CLI — the shell respects credentials too.
+# Replace aster1Qm... with the address from control.py.
 aster shell aster1Qm... --rcan ops-team.cred
 > cd services
 > session AgentSession                 # opens session subshell
@@ -1305,59 +1698,87 @@ AgentSession~ runCommand command="df"  # ✓ ops-team has ops.admin
 **Goal:** Your teammate uses a different language. They don't have your
 source code — just the server address.
 
+Your `control.py` / `control.ts` from Chapter 4 (or 5 with auth) keeps running. The cross-language client below is a brand-new file in a different language — no shared source, no codegen, no `.proto` file.
+
 <LanguageTabs>
 <TabItem value="python">
 
-A TypeScript teammate calls your Python control plane:
+A TypeScript teammate calls your Python control plane. Save this as `ts-agent.ts` (anywhere — it doesn't need to live in the same directory as your Python code) and run it in a separate terminal. Replace `aster1Qm...` with the address your `control.py` printed.
 
 ```typescript
-// Their code — no Python source needed
+// ts-agent.ts — TypeScript client calling a Python control plane.
+// Usage: bun run ts-agent.ts <aster1...address>
 import { AsterClientWrapper } from '@aster-rpc/aster';
 
-const client = new AsterClientWrapper({ address: "aster1Qm..." });
-await client.connect();
+async function main() {
+    const address = process.argv[2];
+    if (!address) {
+        console.error("Usage: bun run ts-agent.ts <aster1...address>");
+        process.exit(1);
+    }
 
-const mc = client.proxy("MissionControl");
-const status = await mc.getStatus({ agent_id: "ts-worker-1" });
-console.log(`Status: ${status.agent_id} is ${status.status}`);
+    const client = new AsterClientWrapper({ address });
+    await client.connect();
 
-// Stream metrics from TypeScript to the Python control plane
-const result = await mc.ingestMetrics(async function*() {
-  for (let i = 0; i < 1000; i++) {
-    yield { name: "gpu.temp", value: 72 + Math.random() * 10 };
-  }
-}());
-console.log(`Accepted: ${result.accepted}`);
+    const mc = client.proxy("MissionControl");
+    const status = await mc.getStatus({ agent_id: "ts-worker-1" });
+    console.log(`Status: ${status.agent_id} is ${status.status}`);
+
+    // Stream metrics from TypeScript to the Python control plane
+    const result = await mc.ingestMetrics(async function*() {
+        for (let i = 0; i < 1000; i++) {
+            yield { name: "gpu.temp", value: 72 + Math.random() * 10 };
+        }
+    }());
+    console.log(`Accepted: ${result.accepted}`);
+
+    await client.close();
+}
+
+main();
+```
+
+```bash
+bun run ts-agent.ts aster1Qm...
 ```
 
 </TabItem>
 <TabItem value="typescript">
 
-A Python teammate calls your TypeScript control plane:
+A Python teammate calls your TypeScript control plane. Save this as `py-agent.py` (anywhere) and run it in a separate terminal. Replace `aster1Qm...` with the address your `control.ts` printed.
 
 ```python
+# py-agent.py — Python client calling a TypeScript control plane.
+# Usage: python py-agent.py <aster1...address>
+import asyncio
+import random
+import sys
 from aster import AsterClient
 
 async def main():
-    client = AsterClient(address="aster1Qm...")
-    await client.connect()
+    if len(sys.argv) < 2:
+        print("Usage: python py-agent.py <aster1...address>")
+        sys.exit(1)
 
-    mc = client.proxy("MissionControl")
-    status = await mc.getStatus({"agent_id": "py-worker-1"})
-    print(f"Status: {status['agent_id']} is {status['status']}")
+    async with AsterClient(address=sys.argv[1]) as client:
+        mc = client.proxy("MissionControl")
+        status = await mc.getStatus({"agent_id": "py-worker-1"})
+        print(f"Status: {status['agent_id']} is {status['status']}")
 
-    # Stream metrics from Python to the TypeScript control plane
-    async def metrics():
-        import random
-        for i in range(1000):
-            yield {"name": "gpu.temp", "value": 72 + random.random() * 10}
+        # Stream metrics from Python to the TypeScript control plane
+        async def metrics():
+            for i in range(1000):
+                yield {"name": "gpu.temp", "value": 72 + random.random() * 10}
 
-    result = await mc.ingestMetrics(metrics())
-    print(f"Accepted: {result['accepted']}")
+        result = await mc.ingestMetrics(metrics())
+        print(f"Accepted: {result['accepted']}")
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
+```
+
+```bash
+python py-agent.py aster1Qm...
 ```
 
 </TabItem>
