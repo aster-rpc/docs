@@ -93,10 +93,10 @@ import { Service, Rpc, SerializationMode } from '@aster-rpc/aster';
   serialization: [SerializationMode.XLANG], // service default
 })
 class AnalyticsService {
-  @Rpc() // inherits XLANG from service
+  @Rpc({ request: Event, response: Ack }) // inherits XLANG from service
   async submitEvent(req: Event): Promise<Ack> { ... }
 
-  @Rpc({ serialization: SerializationMode.ROW }) // override to ROW
+  @Rpc({ request: MetricsQuery, response: MetricsResult, serialization: SerializationMode.ROW }) // override to ROW
   async queryMetrics(req: MetricsQuery): Promise<MetricsResult> { ... }
 }
 ```
