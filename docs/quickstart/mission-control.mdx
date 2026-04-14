@@ -53,7 +53,8 @@ class MissionControl {
 ```
 
 ```bash
-bun run control.ts             # that's the server
+npx aster-gen                  # generate type metadata (one-time build step)
+node control.ts                # that's the server
 aster shell aster1Qm...       # that's the client — tab completion, typed responses
 ```
 
@@ -221,7 +222,9 @@ aster shell aster1Qm...
 
 ```typescript
 // control.ts
-import { AsterServer, Service, Rpc, WireType } from '@aster-rpc/aster';
+import {
+    AsterServer, Service, Rpc, WireType,
+} from '@aster-rpc/aster';
 
 @WireType("mission/StatusRequest")
 class StatusRequest {
@@ -260,8 +263,11 @@ main();
 ```
 
 ```bash
+# Generate type metadata (run once, re-run after changing types/methods)
+npx aster-gen
+
 # Start the control plane
-bun run control.ts
+node control.ts
 # → aster1Qmxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 #   ^^^^^^^ this is your control plane's public-key address — copy it for the next step
 ```
@@ -528,10 +534,11 @@ async function main() {
 main();
 ```
 
-**Restart the service.** Stop the previous run with `Ctrl+C`, then start the new version:
+**Restart the service.** Stop the previous run with `Ctrl+C`, re-run the scanner and start the new version:
 
 ```bash
-bun run control.ts
+npx aster-gen
+node control.ts
 # → aster1Qmxxxxxxxx... ← this is a NEW address; the old one is gone
 ```
 
@@ -948,7 +955,7 @@ import {
 } from '@aster-rpc/aster';
 ```
 
-**Restart `control.ts`** (`Ctrl+C` then `bun run control.ts`) and copy the new address.
+**Re-run `npx aster-gen`** (to pick up the new method), then restart `control.ts` (`Ctrl+C` then `node control.ts`) and copy the new address.
 
 Save this as `metrics.ts` in a **second terminal** to push 10,000 metric points:
 
@@ -1166,14 +1173,20 @@ class AgentSession {
 
     @BidiStream()
     async *runCommand(commands: AsyncIterable<Command>): AsyncGenerator<CommandResult> {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const exec = promisify(execFile);
         for await (const cmd of commands) {
-            const proc = Bun.spawn(["sh", "-c", cmd.command], {
-                stdout: "pipe", stderr: "pipe",
-            });
-            const stdout = await new Response(proc.stdout).text();
-            const stderr = await new Response(proc.stderr).text();
-            const exit_code = await proc.exited;
-            yield new CommandResult({ stdout, stderr, exit_code });
+            try {
+                const { stdout, stderr } = await exec("sh", ["-c", cmd.command]);
+                yield new CommandResult({ stdout, stderr, exit_code: 0 });
+            } catch (e: any) {
+                yield new CommandResult({
+                    stdout: e.stdout ?? "",
+                    stderr: e.stderr ?? e.message,
+                    exit_code: e.code ?? 1,
+                });
+            }
         }
     }
 }

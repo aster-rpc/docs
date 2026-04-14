@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
         'guides/services',
         'guides/define-a-service',
         'guides/dial-a-service',
+        'guides/typescript-build-setup',
         'guides/observability',
         'guides/mcp-integration',
         'guides/port-from-grpc',

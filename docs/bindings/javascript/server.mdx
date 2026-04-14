@@ -89,36 +89,30 @@ class EchoService { ... }
 ### @Rpc
 
 ```typescript
-@Rpc({ request: EchoRequest, response: EchoResponse, timeout: 30, idempotent: true })
+@Rpc({ timeout: 30, idempotent: true })
 async echo(req: EchoRequest): Promise<EchoResponse> { ... }
 ```
 
-> **Note:** TypeScript erases generic type parameters at runtime, so the
-> contract publisher and the `gen-client` codegen pipeline cannot discover
-> the request and response shapes from the method signature alone. Pass
-> the constructors explicitly via `request:` and `response:` so the
-> published manifest carries the wire tag and field list -- this is
-> required for cross-language consumers (Python, Go, Java) to talk to
-> the service.
+The `aster-gen` build step reads request/response types from the AST, so you don't need to pass them in the decorator. Optional keys: `timeout`, `idempotent`, `requires`, `serialization`. See [TypeScript Build Setup](/docs/guides/typescript-build-setup).
 
 ### @ServerStream
 
 ```typescript
-@ServerStream({ request: WatchRequest, response: ItemUpdate })
+@ServerStream()
 async *watchItems(req: WatchRequest): AsyncGenerator<ItemUpdate> { ... }
 ```
 
 ### @ClientStream
 
 ```typescript
-@ClientStream({ request: Item, response: BatchResult })
+@ClientStream()
 async uploadBatch(requests: AsyncIterable<Item>): Promise<BatchResult> { ... }
 ```
 
 ### @BidiStream
 
 ```typescript
-@BidiStream({ request: Message, response: Message })
+@BidiStream()
 async *chat(requests: AsyncIterable<Message>): AsyncGenerator<Message> { ... }
 ```
 

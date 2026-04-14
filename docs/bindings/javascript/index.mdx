@@ -39,7 +39,7 @@ A producer hosts a service over QUIC; a consumer connects by address.
 
 ```typescript
 // service.ts
-import { Service, Rpc, AsterServer, AsterClientWrapper } from '@aster-rpc/aster';
+import { Service, Rpc, AsterServer } from '@aster-rpc/aster';
 
 class HelloRequest {
   name = "";
@@ -53,14 +53,16 @@ class HelloResponse {
 
 @Service({ name: "Hello", version: 1 })
 export class HelloService {
-  @Rpc({ request: HelloRequest, response: HelloResponse })
+  @Rpc()
   async sayHello(req: HelloRequest): Promise<HelloResponse> {
     return new HelloResponse({ message: `Hello, ${req.name}!` });
   }
 }
 
-// Producer
-const server = new AsterServer({ services: [new HelloService()] });
+// Producer (run `npx aster-gen` first)
+const server = new AsterServer({
+  services: [new HelloService()],
+});
 await server.start();
 console.log("Producer ready at:", server.address);
 await server.serve();

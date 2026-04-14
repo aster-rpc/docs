@@ -1,0 +1,180 @@
+---
+id: typescript-build-setup
+title: TypeScript Build Setup
+slug: /guides/typescript-build-setup
+---
+
+TypeScript erases type information at runtime. Aster's `aster-gen` scanner
+reads your source at build time via the TypeScript compiler API, discovers
+all `@Service`, `@WireType`, `@Rpc`, `@ServerStream`, `@ClientStream`, and
+`@BidiStream` decorated classes, and emits `aster-rpc.generated.ts` with
+the metadata the runtime needs — field shapes, wire type mappings, method
+signatures, and contract identity hashes.
+
+This replaces the need to pass `{ request, response }` to every decorator.
+You write clean decorators; the scanner extracts types from the AST.
+
+## Install
+
+```bash
+npm install @aster-rpc/aster
+```
+
+`aster-gen` ships as the `aster-gen` bin inside `@aster-rpc/aster` — no
+extra package needed. TypeScript is a peer dependency (bring your own
+version).
+
+## Run the scanner
+
+```bash
+# defaults: reads ./tsconfig.json, writes ./aster-rpc.generated.ts
+npx aster-gen
+
+# custom paths
+npx aster-gen -p tsconfig.app.json -o build/aster-rpc.generated.ts
+```
+
+Or add it to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "build": "aster-gen && tsc"
+  }
+}
+```
+
+Re-run after adding or changing wire types, RPC methods, or decorator
+options. The generated file is deterministic — same input always produces
+the same output.
+
+## Use in your app
+
+`AsterServer.start()` auto-imports `aster-rpc.generated.js` from the
+working directory — no manual import or wiring needed:
+
+```typescript
+import { AsterServer } from '@aster-rpc/aster';
+import { MyService } from './services.js';
+
+const server = new AsterServer({
+  services: [new MyService()],
+});
+await server.start();
+await server.serve();
+```
+
+If the generated file is missing, the runtime falls back to reflection
+and logs a warning.
+
+## What gets generated
+
+The output `aster-rpc.generated.ts` contains two exports:
+
+- **`WIRE_TYPES`** — ordered array of wire type descriptors (tag, fields,
+  nested type refs, field name sets) in dependency order.
+- **`SERVICES`** — array of service descriptors with method signatures,
+  RPC patterns, pre-derived manifest fields, and BLAKE3 type hashes for
+  cross-language contract identity.
+
+The file is `// @ts-nocheck` and auto-formatted. Commit it or gitignore
+it — either works. Committing makes the example runnable without a build
+step; gitignoring keeps diffs clean.
+
+## Bundler plugins
+
+For projects using a bundler, plugins run `aster-gen` automatically on
+build and during hot reload. When using a bundler plugin, pass the
+`generated` option explicitly since dynamic import won't resolve at
+bundle time:
+
+### Vite
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite';
+import { asterGen } from '@aster-rpc/aster/vite-plugin';
+
+export default defineConfig({
+  plugins: [
+    asterGen({
+      project: 'tsconfig.json',
+      out: 'aster-rpc.generated.ts',
+    }),
+  ],
+});
+```
+
+The plugin runs on `buildStart` and watches for changes to decorated
+source files during dev.
+
+### Webpack
+
+```typescript
+// webpack.config.ts
+import { AsterGenPlugin } from '@aster-rpc/aster/webpack-plugin';
+
+export default {
+  plugins: [
+    new AsterGenPlugin({
+      project: 'tsconfig.json',
+      out: 'aster-rpc.generated.ts',
+    }),
+  ],
+};
+```
+
+The plugin hooks into `beforeCompile` and re-scans when source files
+change.
+
+## Type mapping
+
+The scanner maps TypeScript types to wire types per the Aster spec:
+
+| TypeScript | Wire type |
+|------------|-----------|
+| `string` | `string` |
+| `boolean` | `bool` |
+| `number` | `float64` |
+| `bigint` | `int64` |
+| `Date` | `timestamp` |
+| `Uint8Array` | `binary` |
+| `T[]` / `Array<T>` | `list<T>` |
+| `Set<T>` | `set<T>` |
+| `Map<K, V>` | `map<K, V>` |
+| `T \| null` / `T \| undefined` | `nullable<T>` |
+| Class with `@WireType` | `ref` (by tag) |
+
+### Branded numeric types
+
+Plain `number` maps to `float64`. For narrower types (int32, uint16, etc.),
+use branded types:
+
+```typescript
+import { i32, u64, f32 } from '@aster-rpc/aster';
+
+@WireType("myapp/Metrics")
+class Metrics {
+  count: i32 = 0;       // → int32
+  total_bytes: u64 = 0n; // → uint64
+  avg_latency: f32 = 0;  // → float32
+}
+```
+
+The scanner detects branded types via their phantom property and maps them
+to the correct wire primitive.
+
+## Runtime fallback
+
+If `aster-rpc.generated.js` is not found (e.g. during rapid prototyping),
+the runtime falls back to reflection: instantiating each wire type class
+and inspecting `Object.keys()`. This works for simple cases but has
+limitations:
+
+- Empty arrays don't reveal their element type.
+- Optional/nullable nested types aren't recursed.
+- Non-default-constructible classes can't be introspected.
+- Contract identity hashes are zeroed (cross-language calls won't match).
+
+A console warning fires once per class on the fallback path. For
+production use, always run `aster-gen`.
