@@ -146,12 +146,12 @@ class HelloReply {
 
 @Service({ name: "Greeter", version: 1 })
 class Greeter {
-  @Rpc({ request: HelloRequest, response: HelloReply })
+  @Rpc()
   async sayHello(req: HelloRequest): Promise<HelloReply> {
     return new HelloReply({ message: `Hello, ${req.name}!` });
   }
 
-  @ServerStream({ request: HelloRequest, response: HelloReply })
+  @ServerStream()
   async *streamGreetings(req: HelloRequest): AsyncGenerator<HelloReply> {
     for (let i = 0; i < 5; i++) {
       yield new HelloReply({ message: `Hello #${i}, ${req.name}!` });

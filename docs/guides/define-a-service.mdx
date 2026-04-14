@@ -156,14 +156,14 @@ import { Service, Rpc } from '@aster-rpc/aster';
 
 @Service({ name: "TaskService" })
 class TaskService {
-  @Rpc({ request: TaskRequest, response: TaskResult })
+  @Rpc()
   async assignTask(req: TaskRequest): Promise<TaskResult> {
     return new TaskResult({ taskId: req.taskId, status: "assigned" });
   }
 }
 ```
 
-`@Rpc` requires `{ request, response }` (the wire types) and accepts optional `{ timeout, idempotent, requires }`. TypeScript erases parameter types at runtime, so the framework needs the classes passed explicitly for manifest publication and codec registration; the same applies to `@ServerStream`, `@ClientStream`, and `@BidiStream`.
+`@Rpc()` accepts optional `{ timeout, idempotent, requires }` options.
 
   </TabItem>
 </LanguageTabs>
@@ -193,7 +193,7 @@ class TaskService:
 ```typescript
 @Service({ name: "TaskService" })
 class TaskService {
-  @ServerStream({ request: WatchRequest, response: TaskUpdate })
+  @ServerStream()
   async *watchTasks(req: WatchRequest): AsyncGenerator<TaskUpdate> {
     for (const task of getPendingTasks()) {
       yield new TaskUpdate({ taskId: task.id, status: task.status });
@@ -230,7 +230,7 @@ class TaskService:
 ```typescript
 @Service({ name: "TaskService" })
 class TaskService {
-  @ClientStream({ request: ArtifactChunk, response: UploadResult })
+  @ClientStream()
   async uploadArtifacts(stream: AsyncIterable<ArtifactChunk>): Promise<UploadResult> {
     let totalBytes = 0;
     for await (const chunk of stream) {
@@ -269,7 +269,7 @@ class TaskService:
 ```typescript
 @Service({ name: "TaskService" })
 class TaskService {
-  @BidiStream({ request: ReviewItem, response: ReviewResult })
+  @BidiStream()
   async *interactiveReview(
     requests: AsyncIterable<ReviewItem>
   ): AsyncGenerator<ReviewResult> {

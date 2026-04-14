@@ -110,7 +110,7 @@ class HelloResponse {
 
 @Service({ name: "HelloService", version: 1 })
 export class HelloService {
-  @Rpc({ request: HelloRequest, response: HelloResponse })
+  @Rpc()
   async sayHello(req: HelloRequest): Promise<HelloResponse> {
     return new HelloResponse({
       message: `Hello, ${req.name}!`,

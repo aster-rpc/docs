@@ -45,7 +45,7 @@ aster shell aster1Qm...   # that's the client — tab completion, typed response
 ```typescript
 @Service({ name: "MissionControl", version: 1 })
 class MissionControl {
-    @Rpc({ request: StatusRequest, response: StatusResponse })
+    @Rpc()
     async getStatus(req: StatusRequest): Promise<StatusResponse> {
         return new StatusResponse({ agent_id: req.agent_id, status: "running" });
     }
@@ -239,7 +239,7 @@ class StatusResponse {
 
 @Service({ name: "MissionControl", version: 1 })
 class MissionControl {
-    @Rpc({ request: StatusRequest, response: StatusResponse })
+    @Rpc()
     async getStatus(req: StatusRequest): Promise<StatusResponse> {
         return new StatusResponse({
             agent_id: req.agent_id,
@@ -483,7 +483,7 @@ class MissionControl {
     private _logBuffer: LogEntry[] = [];
     private _logResolve: ((entry: LogEntry) => void) | null = null;
 
-    @Rpc({ request: StatusRequest, response: StatusResponse })
+    @Rpc()
     async getStatus(req: StatusRequest): Promise<StatusResponse> {
         return new StatusResponse({
             agent_id: req.agent_id,
@@ -492,7 +492,7 @@ class MissionControl {
         });
     }
 
-    @Rpc({ request: LogEntry, response: SubmitLogResult })
+    @Rpc()
     async submitLog(entry: LogEntry): Promise<SubmitLogResult> {
         if (this._logResolve) {
             this._logResolve(entry);
@@ -503,7 +503,7 @@ class MissionControl {
         return new SubmitLogResult();
     }
 
-    @ServerStream({ request: TailRequest, response: LogEntry })
+    @ServerStream()
     async *tailLogs(req: TailRequest): AsyncGenerator<LogEntry> {
         while (true) {
             const entry = this._logBuffer.length > 0
@@ -930,7 +930,7 @@ class IngestResult {
 New method on `MissionControl` (add inside the class, alongside `getStatus`/`submitLog`/`tailLogs`):
 
 ```typescript
-@ClientStream({ request: MetricPoint, response: IngestResult })
+@ClientStream()
 async ingestMetrics(stream: AsyncIterable<MetricPoint>): Promise<IngestResult> {
     let accepted = 0;
     for await (const point of stream) {
@@ -1154,7 +1154,7 @@ class AgentSession {
     private _agent_id: string = "";
     private _capabilities: string[] = [];
 
-    @Rpc({ request: Heartbeat, response: Assignment })
+    @Rpc()
     async register(hb: Heartbeat): Promise<Assignment> {
         this._agent_id = hb.agent_id;
         this._capabilities = hb.capabilities;
@@ -1164,7 +1164,7 @@ class AgentSession {
         return new Assignment({ task_id: "idle", command: "sleep 60" });
     }
 
-    @BidiStream({ request: Command, response: CommandResult })
+    @BidiStream()
     async *runCommand(commands: AsyncIterable<Command>): AsyncGenerator<CommandResult> {
         for await (const cmd of commands) {
             const proc = Bun.spawn(["sh", "-c", cmd.command], {
@@ -1490,23 +1490,23 @@ const Role = {
 @Service({ name: "MissionControl", version: 1 })
 class MissionControl {
 
-    @Rpc({ request: StatusRequest, response: StatusResponse, requires: Role.STATUS })
+    @Rpc({ requires: Role.STATUS })
     async getStatus(req: StatusRequest): Promise<StatusResponse> { ... }
 
-    @ServerStream({ request: TailRequest, response: LogEntry, requires: anyOf(Role.LOGS, Role.ADMIN) })
+    @ServerStream({ requires: anyOf(Role.LOGS, Role.ADMIN) })
     async *tailLogs(req: TailRequest): AsyncGenerator<LogEntry> { ... }
 
-    @ClientStream({ request: MetricPoint, response: IngestResult, requires: Role.INGEST })
+    @ClientStream({ requires: Role.INGEST })
     async ingestMetrics(stream: AsyncIterable<MetricPoint>): Promise<IngestResult> { ... }
 }
 
 @Service({ name: "AgentSession", version: 1, scoped: "session" })
 class AgentSession {
 
-    @Rpc({ request: Heartbeat, response: Assignment, requires: Role.INGEST })
+    @Rpc({ requires: Role.INGEST })
     async register(hb: Heartbeat): Promise<Assignment> { ... }
 
-    @BidiStream({ request: Command, response: CommandResult, requires: Role.ADMIN })
+    @BidiStream({ requires: Role.ADMIN })
     async *runCommand(commands: AsyncIterable<Command>): AsyncGenerator<CommandResult> { ... }
 }
 ```
