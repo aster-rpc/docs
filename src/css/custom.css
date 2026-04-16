@@ -2470,3 +2470,13 @@ html[data-theme='light'] .asterSignalPanel__meta span {
   0%, 48% { opacity: 1; }
   49%, 100% { opacity: 0; }
 }
+
+/* ── Accessibility: focus-visible ──────────────────────────────────────── */
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--aster-teal);
+  outline-offset: 3px;
+  border-radius: 4px;
+}

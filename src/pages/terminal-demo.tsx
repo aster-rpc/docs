@@ -8,7 +8,7 @@ export default function TerminalDemo(): React.JSX.Element {
     <Layout
       title="Terminal Animation Demo"
       description="Isolated Aster terminal animation prototype driven by a polished asciicast recording.">
-      <main className="asterHome asterTerminalDemoPage">
+      <main id="main-content" className="asterHome asterTerminalDemoPage">
         <section className="asterSection">
           <div className="container">
             <div className="asterTerminalDemoPage__header">

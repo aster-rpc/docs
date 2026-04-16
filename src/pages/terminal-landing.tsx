@@ -91,7 +91,7 @@ export default function TerminalLanding(): React.JSX.Element {
     <Layout
       title="Terminal Landing Prototype"
       description="Alternative Aster landing page concept using a focused terminal animation hero.">
-      <main className="asterHome asterTerminalLandingPage">
+      <main id="main-content" className="asterHome asterTerminalLandingPage">
         <section className="asterTerminalLandingHero">
           <div className="container asterTerminalLandingHero__container">
             <div className="asterTerminalLandingHero__copy">

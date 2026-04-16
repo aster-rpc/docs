@@ -32,6 +32,35 @@ const config: Config = {
 
   onBrokenLinks: 'throw',
 
+  headTags: [
+    {
+      tagName: 'link',
+      attributes: {
+        rel: 'preload',
+        as: 'font',
+        type: 'font/ttf',
+        href: '/fonts/geist/Geist-VariableFont_wght.ttf',
+        crossorigin: 'anonymous',
+      },
+    },
+    {
+      tagName: 'script',
+      attributes: { type: 'application/ld+json' },
+      innerHTML: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        name: 'Aster Docs',
+        url: 'https://docs.aster.site',
+        description: 'Documentation for Aster — peer-to-peer RPC framework with cryptographic identity.',
+        publisher: {
+          '@type': 'Organization',
+          name: 'Aster',
+          url: 'https://aster.site',
+        },
+      }),
+    },
+  ],
+
   // Even if you don't use internationalization, you can use this field to set
   // useful metadata like html lang. For example, if your site is Chinese, you
   // may want to replace "en" with "zh-Hans".

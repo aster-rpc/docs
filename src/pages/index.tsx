@@ -364,7 +364,7 @@ export default function Home(): React.JSX.Element {
     <Layout
       title="Machines authenticate to machines, on behalf of users."
       description="Peer-to-peer RPC framework with identity in the connection. Capability-based auth, cross-language wire format, built on iroh QUIC.">
-      <main className="asterHome">
+      <main id="main-content" className="asterHome">
         <section className="asterHero">
           <div className="container asterHero__container">
             <div className="asterHero__content">
