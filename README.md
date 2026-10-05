@@ -1,41 +1,45 @@
-# Website
+# Aster documentation
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+The public documentation at <https://docs.aster.site> uses Astro and Starlight.
 
-## Installation
+## Development
 
-```bash
-yarn
+Use Node 22.12 or newer (deployment uses Node 24).
+
+```sh
+npm ci
+npm run dev
 ```
 
-## Local Development
+Edit public pages under `src/content/docs/`. Explicit frontmatter slugs preserve
+existing public URLs. Navigation is configured in `astro.config.mjs`; Aster
+styles are in `src/styles/aster.css`.
 
-```bash
-yarn start
+```sh
+npm run build
+npm run preview
 ```
 
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
+The static output is `dist/`. Search uses Pagefind and should be checked in the
+production preview. Astro 7 starts preview in the background; stop it with
+`npm exec astro preview stop`.
 
-## Build
+## Content and assets
 
-```bash
-yarn build
-```
+`public/` contains fonts, images, generated Python and TypeScript API references,
+and downloadable tutorial instructions. The two agent instructions are drafts
+until they have been run in a fresh harness. Tutorial instructions and their
+matching prose must stay aligned.
 
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
+The migration preserves existing public documentation, including existing
+version and feature claims. Release content refinement is a separate pass.
+Legacy Docusaurus sources in `docs/`, `static/`, and excluded React pages remain
+for reference; edit the Starlight sources for the current site.
+
+Internal notes under `_internal/` are ignored and are not published.
 
 ## Deployment
 
-Using SSH:
-
-```bash
-USE_SSH=true yarn deploy
-```
-
-Not using SSH:
-
-```bash
-GIT_USER=<Your GitHub username> yarn deploy
-```
-
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+Pushing `main` runs `.github/workflows/deploy.yml`. It installs with `npm ci`,
+builds the site, and deploys `dist/` to GitHub Pages. `public/CNAME` preserves the
+custom domain. The workflow can also be started manually.

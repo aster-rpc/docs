@@ -1,0 +1,288 @@
+---
+title: Quickstart
+slug: "docs/quickstart/python"
+description: Write a service on one machine, call it from another -- even if they're on different networks. In under two minutes.
+---
+
+import AgentBrief from '@components/AgentBrief.astro';
+import agentPrompt from '@prompts/first-service.txt?raw';
+
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+
+<AgentBrief prompt={agentPrompt} download="/prompts/first-service.txt" />
+Write a service on one machine, call it from another -- even if they're on different networks, behind firewalls, with no shared infrastructure between them. In under two minutes.
+
+## Prerequisites
+
+<Tabs syncKey="language">
+<TabItem label="Python">
+
+- **Python 3.9 -- 3.13** (3.14+ is not yet supported)
+- pip, [uv](https://docs.astral.sh/uv/), or any PEP 517 installer
+
+</TabItem>
+<TabItem label="TypeScript">
+
+- **Node.js 20+** or **Bun 1.0+**
+- TypeScript 5.0+ (decorators require `experimentalDecorators`)
+
+</TabItem>
+</Tabs>
+
+## Install
+
+<Tabs syncKey="language">
+<TabItem label="Python">
+
+```bash
+pip install aster-rpc
+```
+
+Or with uv:
+
+```bash
+uv pip install aster-rpc
+```
+
+</TabItem>
+<TabItem label="TypeScript">
+
+```bash
+# bun (recommended)
+bun add @aster-rpc/aster
+
+# or npm
+npm install @aster-rpc/aster
+```
+
+</TabItem>
+</Tabs>
+
+## Define a service
+
+A **service** is a class that exposes one or more methods callable by remote consumers. You write it like a regular class; Aster handles the wire format, transport, and remote dispatch.
+
+<Tabs syncKey="language">
+<TabItem label="Python">
+
+Create `hello_service.py`:
+
+```python
+from dataclasses import dataclass
+from aster import service, rpc
+
+
+@dataclass
+class HelloRequest:
+    name: str = ""
+
+
+@dataclass
+class HelloResponse:
+    message: str = ""
+
+
+@service
+class HelloService:
+    @rpc
+    async def say_hello(self, req: HelloRequest) -> HelloResponse:
+        return HelloResponse(message=f"Hello, {req.name}!")
+```
+
+Three decorators: `@dataclass` (standard Python), `@service` (marks the class as an Aster service), `@rpc` (marks a method as a callable endpoint). No schema files, no code generation, no base classes. Wire tags are auto-derived from the class names; for production cross-language services you'll add explicit `@wire_type("ns/Type")` decorators -- see [Defining Services and Types](/docs/guides/services).
+
+</TabItem>
+<TabItem label="TypeScript">
+
+Create `service.ts`:
+
+```typescript
+import { Service, Rpc } from '@aster-rpc/aster';
+
+class HelloRequest {
+  name = "";
+  constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
+}
+
+class HelloResponse {
+  message = "";
+  constructor(init?: Partial<HelloResponse>) { if (init) Object.assign(this, init); }
+}
+
+@Service({ name: "HelloService", version: 1 })
+export class HelloService {
+  @Rpc()
+  async sayHello(req: HelloRequest): Promise<HelloResponse> {
+    return new HelloResponse({
+      message: `Hello, ${req.name}!`,
+    });
+  }
+}
+```
+
+Two decorators: `@Service` (marks the class as an Aster service), `@Rpc` (marks a method as a callable endpoint). No schema files, no base classes. Wire tags are auto-derived from the class names; for production cross-language services you'll add explicit `@WireType("ns/Type")` decorators -- see [Defining Services and Types](/docs/guides/services).
+
+Before running, generate type metadata with `npx aster-gen` — this reads your TypeScript source and emits `aster-rpc.generated.ts`, which `AsterServer` auto-imports on startup. See [TypeScript Build Setup](/docs/guides/typescript-build-setup) for details and bundler plugin options.
+
+</TabItem>
+</Tabs>
+
+## Run a producer
+
+A producer is the node that hosts the service.
+
+<Tabs syncKey="language">
+<TabItem label="Python">
+
+Create `producer.py`:
+
+```python
+import asyncio
+from hello_service import HelloService
+from aster import AsterServer
+
+
+async def main():
+    async with AsterServer(services=[HelloService()]) as srv:
+        print("Producer ready at:", srv.address)
+        await srv.serve()
+
+
+asyncio.run(main())
+```
+
+```bash
+python producer.py
+```
+
+</TabItem>
+<TabItem label="TypeScript">
+
+Generate type metadata, then create `producer.ts`:
+
+```bash
+npx aster-gen
+```
+
+```typescript
+import { AsterServer } from '@aster-rpc/aster';
+import { HelloService } from './service.js';
+
+const server = new AsterServer({
+  services: [new HelloService()],
+});
+await server.start();
+console.log("Producer ready at:", server.address);
+await server.serve();
+```
+
+```bash
+node producer.ts
+```
+
+</TabItem>
+</Tabs>
+
+In dev mode (no `ASTER_*` environment variables set), the server:
+
+- Generates an ephemeral root key and node identity (no files needed).
+- Opens the consumer gate so consumers can connect without credentials.
+- Serves RPC, blobs, docs, and gossip on a single endpoint.
+- Prints an `aster1...` address for consumers to connect to.
+
+## Run a consumer
+
+A **consumer** is the node that calls into a producer's services. Consumers don't need access to the service's source code -- they discover methods from the producer's published contract at runtime, then call them by name.
+
+The producer and consumer don't have to live on the same machine, or even the same network. Your producer might be in a cloud environment behind a corporate firewall; your consumer might be on your laptop on coffee shop Wi-Fi, or on a Raspberry Pi behind your home router, or on a phone tethered to a 5G connection. No VPN to set up, no firewall rule to add, no port to forward, no DNS entry to register. The address the consumer uses is the producer's public key -- Aster figures out the network path between them, direct if it can and relayed if it has to.
+
+<Tabs syncKey="language">
+<TabItem label="Python">
+
+Create `consumer.py`:
+
+```python
+import asyncio
+from aster import AsterClient
+
+
+async def main():
+    async with AsterClient() as c:
+        # The dynamic proxy speaks JSON and needs no local type definitions --
+        # methods are discovered from the producer's published contract.
+        hello = c.proxy("HelloService")
+        resp = await hello.say_hello({"name": "World"})
+        print(resp["message"])  # Hello, World!
+
+
+asyncio.run(main())
+```
+
+Run it, passing the producer's address:
+
+```bash
+# macOS / Linux
+ASTER_ENDPOINT_ADDR=<paste from producer output> python consumer.py
+```
+
+```powershell
+# Windows (PowerShell)
+$env:ASTER_ENDPOINT_ADDR="<paste from producer output>"; python consumer.py
+```
+
+`AsterClient` reads `ASTER_ENDPOINT_ADDR` from the environment and connects to the producer. `c.proxy("HelloService")` returns a dynamic stub -- call methods on it like regular async functions. If you'd rather have typed classes (for IDE autocomplete and static checking), share the service definition module between producer and consumer and use `c.client(HelloService)` instead -- see [Defining Services and Types](/docs/guides/services).
+
+</TabItem>
+<TabItem label="TypeScript">
+
+Create `consumer.ts`:
+
+```typescript
+import { AsterClientWrapper } from '@aster-rpc/aster';
+
+const client = new AsterClientWrapper({
+  address: process.env.ASTER_ENDPOINT_ADDR!,
+});
+await client.connect();
+
+// The dynamic proxy speaks JSON and needs no local type definitions --
+// methods are discovered from the producer's published contract.
+const hello = client.proxy("HelloService");
+const resp = await hello.sayHello({ name: "World" });
+console.log(resp.message); // Hello, World!
+
+await client.close();
+```
+
+Run it, passing the producer's address:
+
+```bash
+# macOS / Linux
+ASTER_ENDPOINT_ADDR=<paste from producer output> node consumer.ts
+```
+
+```powershell
+# Windows (PowerShell)
+$env:ASTER_ENDPOINT_ADDR="<paste from producer output>"; node consumer.ts
+```
+
+</TabItem>
+</Tabs>
+
+## What just happened
+
+Three steps, three things to notice:
+
+1. **The producer is a server process holding `HelloService`.** When it starts, it prints an `aster1...` address. That address is the node's public key, not a hostname or an IP -- it's stable, globally unique, and can't be impersonated.
+
+2. **The consumer connects by that public key.** No DNS lookup, no port forwarding, no certificate to trust. The consumer doesn't even need a copy of the service source code -- it asks the producer what methods exist and builds a stub at runtime.
+
+3. **The producer and consumer don't have to be on the same machine, or even the same network.** In this quickstart they're both on your laptop because that's the simplest demo. But the address is a public key, so you can run the producer on your homelab, your VPS, or a Raspberry Pi behind your home router, and call it from your laptop on coffee shop Wi-Fi without changing a single line of code. Aster handles NAT traversal and chooses the best network path -- direct if it can, relayed if it has to.
+
+To try this for real, run `producer.py` on one machine and `consumer.py` on another. Copy the `aster1...` address from the producer's output, paste it into the consumer's `ASTER_ENDPOINT_ADDR`, and the call will arrive over whatever network path actually exists between the two machines. No tunnels, no proxies, no shared secrets.
+
+## What's next
+
+Build a real service end-to-end with the **[Mission Control walkthrough](/docs/quickstart/mission-control)** -- 30 minutes, six chapters, four streaming patterns, capability-scoped auth, cross-language interop, and a working MCP agent demo at the end.

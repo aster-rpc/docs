@@ -1,0 +1,53 @@
+---
+interface Props { source: string; }
+const { source } = Astro.props;
+---
+<figure class="mermaid-diagram not-content" data-mermaid-diagram>
+  <div data-diagram-output aria-label="Documentation diagram"></div>
+  <details open><summary>Diagram source</summary><pre><code data-diagram-source>{source}</code></pre></details>
+  <p data-diagram-status role="status" hidden></p>
+</figure>
+<script>
+  import mermaid from 'mermaid';
+  const diagrams = [...document.querySelectorAll<HTMLElement>('[data-mermaid-diagram]')];
+  let rendering = false;
+  let pending = false;
+  let generation = 0;
+  async function render() {
+    if (rendering) { pending = true; return; }
+    rendering = true;
+    const dark = document.documentElement.dataset.theme === 'dark';
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'default', fontFamily: 'Geist, sans-serif' });
+    for (const [index, figure] of diagrams.entries()) {
+      const output = figure.querySelector<HTMLElement>('[data-diagram-output]');
+      const source = figure.querySelector<HTMLElement>('[data-diagram-source]');
+      const details = figure.querySelector('details');
+      const status = figure.querySelector<HTMLElement>('[data-diagram-status]');
+      if (!output || !source || !details || !status) continue;
+      try {
+        const { svg } = await mermaid.render(`aster-diagram-${generation++}-${index}`, source.textContent ?? '');
+        output.innerHTML = svg;
+        details.open = false;
+        status.hidden = true;
+      } catch {
+        output.replaceChildren();
+        details.open = true;
+        status.textContent = 'The diagram could not be drawn. Its source is available above.';
+        status.hidden = false;
+      }
+    }
+    rendering = false;
+    if (pending) { pending = false; await render(); }
+  }
+  await document.fonts.ready;
+  await render();
+  new MutationObserver(() => { void render(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+</script>
+<style>
+  .mermaid-diagram { margin: 1.5rem 0; border: 1px solid var(--sl-color-gray-5); border-radius: 6px; padding: 1rem; overflow-x: auto; }
+  [data-diagram-output] { display: flex; justify-content: center; }
+  [data-diagram-output] :global(svg) { height: auto; max-width: 100%; }
+  summary { cursor: pointer; color: var(--sl-color-gray-2); font-size: .75rem; }
+  pre { overflow-x: auto; font: .75rem/1.7 var(--sl-font-mono); }
+  [data-diagram-status] { color: var(--sl-color-gray-2); font-size: .75rem; }
+</style>

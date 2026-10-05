@@ -1,0 +1,313 @@
+---
+title: CLI Reference
+slug: "docs/reference/cli"
+---
+
+
+The `aster` command-line tool provides utilities for managing profiles, enrolling nodes, generating contracts, invoking services, and exploring remote peers interactively. Servers are started from Python code using `AsterServer`; the CLI provides the client-side tools for connecting, testing, and generating typed client libraries.
+
+## Installation
+
+The CLI ships as a separate package, `aster-cli`, which depends on `aster-rpc`:
+
+```bash
+pip install aster-cli
+```
+
+This installs both the framework and the `aster` command-line tool. Or install from a source checkout:
+
+```bash
+pip install -e cli/
+```
+
+## Commands
+
+### `aster contract gen`
+
+Generate a contract manifest for one or more services. This computes the deterministic `contract_id` for each service version and writes it to a JSON manifest file. No network connection or credentials required.
+
+```bash
+aster contract gen --service my_module:MyServiceClass --out .aster/manifest.json
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `--service MODULE:CLASS` | Python import path to the `@service`-decorated class. May be specified multiple times. |
+| `--out PATH` | Output path for the manifest JSON file. Default: `.aster/manifest.json`. |
+
+The manifest is checked at `AsterServer` startup. If a service's live `contract_id` does not match the committed manifest, the server refuses to start. This prevents accidental wire-breaking changes.
+
+**Example workflow:**
+
+```bash
+# Generate manifest
+aster contract gen --service myapp.services:TaskService --out .aster/manifest.json
+
+# Commit the manifest
+git add .aster/manifest.json && git commit -m "Update contract manifest"
+
+# Server validates on startup
+python producer.py  # fails if interface changed without updating manifest
+```
+
+### `aster trust keygen`
+
+Generate cryptographic keys for the Aster trust model.
+
+```bash
+# Generate a root keypair (operator's offline machine)
+aster trust keygen root --out root.key
+
+# Extract the public key from a root keypair
+aster trust keygen pubkey --in root.key --out root_pub.key
+```
+
+The root keypair file is JSON containing `private_key` and `public_key` as hex strings. The public key file contains just the hex-encoded 32-byte public key.
+
+### `aster trust sign`
+
+Sign enrollment credentials for consumers or producers.
+
+```bash
+# Sign a consumer enrollment credential
+aster trust sign consumer \
+  --root-key root.key \
+  --type policy \
+  --expires 30d \
+  --out consumer.token
+
+# Sign with specific attributes
+aster trust sign consumer \
+  --root-key root.key \
+  --type policy \
+  --attr team=billing \
+  --attr tier=premium \
+  --expires 90d \
+  --out consumer.token
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `--root-key PATH` | Path to the root keypair file. |
+| `--type TYPE` | Credential type: `policy` (long-lived) or `ott` (one-time token). |
+| `--expires DURATION` | Expiry: relative (`30d`, `24h`) or absolute ISO 8601 (`2025-12-31T23:59:59`). Default: 30 days. |
+| `--attr KEY=VALUE` | Attribute key-value pair. May be specified multiple times. |
+| `--endpoint-id HEX` | Bind the credential to a specific endpoint ID. |
+| `--out PATH` | Output path for the signed credential JSON. |
+
+### `aster enroll node`
+
+Generate (or reuse) a node keypair, sign an enrollment credential, and write or update the `.aster-identity` file. This is the primary operator workflow for adding nodes to a mesh.
+
+```bash
+# Enroll a producer node
+aster enroll node \
+  --profile prod \
+  --role producer \
+  --name billing-producer
+
+# Enroll a consumer node
+aster enroll node \
+  --profile prod \
+  --role consumer \
+  --name analytics-consumer \
+  --identity .aster-identity
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `--profile NAME` | Profile to use (determines root key). Default: active profile. |
+| `--role ROLE` | Node role: `producer` or `consumer`. |
+| `--name NAME` | Human-readable name for the peer entry. |
+| `--identity PATH` | Path to the `.aster-identity` file. Default: `.aster-identity` in current directory. |
+| `--expires DURATION` | Credential expiry. Default: 30 days. |
+
+The command reads the root private key from the OS keyring (stored by `aster profile create`), generates or reuses the node's secret key, computes the `EndpointId`, signs a credential, and appends a `[[peers]]` entry to the identity file.
+
+### `aster profile`
+
+Manage operator profiles. Profiles represent deployment meshes (dev, staging, prod) and store the root public key. The root private key is stored in the OS keyring.
+
+```bash
+# Create a new profile (generates root keypair, stores private key in keyring)
+aster profile create prod
+
+# List all profiles
+aster profile list
+
+# Switch active profile
+aster profile use prod
+
+# Show profile details
+aster profile show prod
+
+# Delete a profile
+aster profile delete staging
+```
+
+### `aster config show`
+
+Display the resolved configuration with provenance tracking. Equivalent to calling `AsterConfig.from_env().print_config()`.
+
+```bash
+aster config show
+aster config show --json
+```
+
+### `aster call`
+
+Invoke a unary RPC method on a remote service from the command line. One-shot, non-interactive.
+
+```bash
+aster call <ADDRESS> <SERVICE.METHOD> '<JSON>'
+```
+
+**Example:**
+
+```bash
+aster call aster1Qm... MissionControl.getStatus '{"agent_id": "edge-node-7"}'
+```
+
+Uses the proxy client with JSON serialization mode. No type definitions or codegen needed.
+
+> **Limitations:**
+> - **Shared services only.** Session-scoped services (`scoped="session"`) require a
+>   persistent session connection that `aster call` doesn't establish. Use `aster shell`
+>   or the proxy client for those.
+> - **Unary methods only.** Streaming methods (`server_stream`, `client_stream`,
+>   `bidi_stream`) need the shell or proxy client. `aster call` is request-response.
+
+### `aster shell`
+
+Interactive shell for exploring and invoking services on a remote peer.
+
+```bash
+aster shell <ADDRESS>
+```
+
+Provides `cd`, `ls`, `describe`, `./methodName` for navigation and invocation. Tab completion for service names, methods, and arguments.
+
+### `aster contract gen-client`
+
+Generate a typed client library from a running service or exported manifest.
+
+```bash
+# From a live service
+aster contract gen-client aster1Qm... --out ./clients --package my_client
+
+# From an exported manifest
+aster contract gen-client ./Service.aster.json --out ./clients --package my_client
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `SOURCE` | `aster1...` ticket, `.aster.json` file path, or `@handle/Service`. |
+| `--out DIR` | Output directory for generated files. |
+| `--package NAME` | Package/module name. Default: derived from source. |
+| `--lang LANG` | Target language. Default: `python`. |
+
+### `aster contract export`
+
+Export a contract manifest to a portable `.aster.json` file for sharing.
+
+```bash
+aster contract export --manifest .aster/manifest.json -o ./exports/
+```
+
+### `aster contract import`
+
+Import a `.aster.json` file into the local contract store.
+
+```bash
+aster contract import ./TaskManager.aster.json
+```
+
+### `aster contract verify`
+
+Verify an exported `.aster.json` matches the local manifest.
+
+```bash
+aster contract verify ./TaskManager.aster.json
+```
+
+### `aster join`
+
+Claim a handle on the `@aster` registry.
+
+```bash
+aster join --handle myname --email me@example.com
+```
+
+### `aster verify`
+
+Complete email verification for a claimed handle.
+
+```bash
+aster verify --code 123456
+```
+
+### `aster publish`
+
+Publish a service to the `@aster` registry for discovery.
+
+```bash
+aster publish TaskManager
+```
+
+### `aster discover`
+
+Search the `@aster` registry for published services.
+
+```bash
+aster discover task
+```
+
+### `aster access`
+
+Manage access control for published services.
+
+```bash
+aster access grant @alice --service TaskManager --role reader
+aster access revoke @alice --service TaskManager
+aster access list --service TaskManager
+```
+
+### `aster mcp`
+
+Start an MCP (Model Context Protocol) server that exposes Aster services as tools for AI agents.
+
+```bash
+aster mcp <ADDRESS>
+```
+
+## Profile system
+
+Profiles are stored in `~/.aster/config.toml`:
+
+```toml
+active_profile = "prod"
+
+[profiles.dev]
+root_pubkey = "<hex>"
+created_at = "2025-01-15T10:30:00"
+
+[profiles.prod]
+root_pubkey = "<hex>"
+created_at = "2025-01-20T14:00:00"
+```
+
+The corresponding root private keys are stored in the OS keyring under the key `aster-root-<profile-name>`. The private key never touches the filesystem.
+
+## `.aster-identity` file
+
+The `.aster-identity` file is a TOML file containing a node's secret key and enrollment credentials. It is generated by `aster enroll node` and consumed by `AsterServer` and `AsterClient` at startup.
+
+See [Configuration](/docs/reference/configuration) for the file format and how it integrates with `AsterConfig`.

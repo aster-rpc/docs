@@ -1,0 +1,40 @@
+---
+title: Aster documentation
+description: Build peer-to-peer applications with typed services, cryptographic identities, and scoped access.
+tableOfContents: false
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+Aster is an enterprise peer-to-peer application SDK. Define a typed service,
+connect to a peer by its cryptographic identity, and control which calls it may
+make. Use the SDK to connect services across developer machines, customer
+networks, and cloud instances.
+
+## Start with a working service
+
+Create a service and call it from a second process. The quickstart includes
+Python and TypeScript examples. You can follow the steps yourself or copy an
+instruction into your coding harness.
+
+<LinkCard title="Your first service" description="Install Aster, start a producer, and make a call." href="/docs/quickstart/python/" />
+<LinkCard title="Build MissionControl" description="Agent check-ins, logs, metrics, sessions, and operator access." href="/docs/quickstart/mission-control/" />
+
+## Understand the connection
+
+Peer identity, network connectivity, and permission are separate parts of an
+application. Learn how they fit together before configuring a trusted deployment.
+
+- [Peer connections](/docs/concepts/transport/) — identities, direct paths, and relay fallback.
+- [Trust model](/docs/concepts/trust-model/) — admission, credentials, and method permissions.
+- [Contract identity](/docs/concepts/contract-identity/) — how service interfaces are identified.
+
+## Find the API and settings
+
+- [Python guide](/docs/bindings/python/) — installation and the language surface.
+- [Configuration](/docs/reference/configuration/) — settings, defaults, and environment variables.
+- [Python API](/api/python/aster/public.html) and [TypeScript API](/api/typescript/) — generated reference.
+
+The SDK is built on [Iroh](https://iroh.computer/) for peer connectivity and
+[Apache Fory](https://fory.apache.org/) for serialization. The
+[Aster website](https://aster.site/) introduces the project and its examples.

@@ -1,0 +1,23 @@
+---
+interface Props { prompt: string; download: string; title?: string; }
+const { prompt, download, title = 'Build with an agent' } = Astro.props;
+---
+<section class="agent-brief not-content" aria-label={title} data-agent-brief>
+  <div class="agent-heading"><div><h2>{title}</h2><p>Paste the instruction into your coding harness, or follow the steps below.</p></div><span class="prompt-status">Prompt draft</span></div>
+  <div class="agent-actions"><button type="button" data-copy-prompt hidden>Copy instruction</button><a href={download} download>Download .txt</a><span role="status" aria-live="polite" data-copy-status></span></div>
+  <details><summary>Read the instruction</summary><pre class="agent-prompt"><code>{prompt}</code></pre></details>
+  <p class="agent-note">This instruction has not yet been tested in a harness. It is included here to review the tutorial format.</p>
+</section>
+<script>
+  document.querySelectorAll<HTMLElement>('[data-agent-brief]').forEach((brief) => {
+    const button = brief.querySelector<HTMLButtonElement>('[data-copy-prompt]');
+    const prompt = brief.querySelector<HTMLElement>('.agent-prompt code');
+    const status = brief.querySelector<HTMLElement>('[data-copy-status]');
+    if (!button || !prompt || !status || !navigator.clipboard) return;
+    button.hidden = false;
+    button.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(prompt.textContent ?? ''); status.textContent = 'Instruction copied.'; }
+      catch { status.textContent = 'Copy unavailable. Open the instruction to select its text, or download it.'; }
+    });
+  });
+</script>

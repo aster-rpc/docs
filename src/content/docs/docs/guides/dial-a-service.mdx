@@ -1,0 +1,222 @@
+---
+title: Dial a Service
+description: Three ways to connect to an Aster service -- typed client, dynamic shell, and raw transport.
+slug: "docs/guides/dial-a-service"
+---
+
+import MermaidDiagram from '@components/MermaidDiagram.astro';
+
+
+# Dial a Service
+
+There are three ways to call an Aster service, depending on your situation:
+
+| Approach | When to use | Needs local types? |
+|----------|------------|-------------------|
+| **Typed client** | Application code, CI pipelines, production services | Yes |
+| **Aster shell** | Exploration, debugging, ad-hoc calls, ops | No |
+| **Raw transport** | Custom tooling, other-language FFI, testing | No |
+
+## 1. Typed client (recommended for application code)
+
+The typed client gives you IDE autocomplete, type checking, and compile-time safety. You need the service's Python type definitions (the `@service`-decorated class and its request/response dataclasses).
+
+```python
+import asyncio
+from aster import AsterClient
+from my_services import HelloService, HelloRequest
+
+async def main():
+    async with AsterClient(address="aster1...") as c:
+        hello = await c.client(HelloService)
+        resp = await hello.say_hello(HelloRequest(name="World"))
+        print(resp.message)  # Hello, World!
+
+asyncio.run(main())
+```
+
+The consumer needs:
+- **The producer's endpoint address** -- printed on startup, or set via `ASTER_ENDPOINT_ADDR`
+- **The service type definitions** -- the same `@service` class (or a compatible package) as the producer
+
+### How it works
+
+1. `AsterClient` connects to the producer's admission endpoint
+2. The admission response lists available services (name, version, contract_id)
+3. `client.client(HelloService)` matches the local class to the remote service by name + version
+4. A QUIC connection opens on `aster/1` and a typed `ServiceClient` is returned
+5. Method calls serialize via Fory XLANG → send frame → receive frame → deserialize
+
+### Getting the types
+
+In production, service authors publish a client package containing the type definitions:
+
+```bash
+pip install billing-service-types  # published by the service team
+```
+
+```python
+from billing_types import BillingService, InvoiceRequest
+```
+
+For internal services, the types often live in a shared module imported by both producer and consumer.
+
+### Identity and credentials
+
+For dev mode (open gate), just set the address:
+
+```bash
+ASTER_ENDPOINT_ADDR=<addr> python consumer.py
+```
+
+For production, use an `.aster-identity` file:
+
+```bash
+# Generate with the CLI:
+aster enroll node --profile prod --role consumer --name my-consumer
+
+# Then just run -- the identity file provides everything:
+ASTER_ENDPOINT_ADDR=<addr> python consumer.py
+```
+
+See [AsterClient](/docs/bindings/python/client) for the full Python API reference.
+
+
+## 2. Aster shell (for exploration and debugging)
+
+The Aster shell connects to any peer and lets you browse services, inspect contracts, and invoke methods interactively -- without needing the Python type definitions locally.
+
+```bash
+# Connect to a producer
+aster shell <endpoint-addr-b64>
+
+# Or explore in demo mode (no live peer needed)
+aster shell --demo
+```
+
+### What the shell can do
+
+```
+producer:/$ ls
+  blobs/     services/     gossip/
+
+producer:/$ cd services
+producer:/services$ ls
+  Service         Methods    Version    Pattern
+  HelloService          1         v1    shared
+  TaskRunner            3         v2    shared
+
+producer:/services$ cd HelloService
+producer:/services/HelloService$ ls
+  Method       Pattern    Signature
+  say_hello    unary      (HelloRequest) -> HelloResponse
+
+producer:/services/HelloService$ ./say_hello name="World"
+-> HelloService.say_hello(name='World')
+(42ms)
+{
+  "message": "Hello, World!"
+}
+```
+
+### Dynamic invocation without local types
+
+The shell does not just discover methods -- it can invoke them too, without any
+local type definitions. When connected to a peer, the shell reads contract
+manifests and synthesizes wire-compatible types at runtime. Field names, types,
+defaults, and Fory wire tags are all extracted from the manifest, so the shell
+can build correctly serialized requests on the fly. This means you can explore
+AND invoke any service from the shell without installing the service's client
+package.
+
+### How it discovers methods
+
+The shell reads the service contract from the producer's registry:
+
+1. Admission response includes a **registry ticket** (read-only iroh-docs share)
+2. The shell joins the registry doc and reads `ArtifactRef` entries
+3. Each ArtifactRef points to a blob collection containing `manifest.json`
+4. The manifest has full method schemas: names, patterns, field definitions with types and defaults
+5. Tab completion and interactive prompting work from this metadata
+
+### Shell features
+
+- **Filesystem-like navigation** -- `cd`, `ls`, `pwd`, `cat`, `save`
+- **Tab completion** -- service names, method names, argument names
+- **Interactive prompting** -- call a method with no args and it prompts for each field
+- **All streaming patterns** -- server-stream displays values as they arrive, bidi shows split input/output
+- **Contract introspection** -- `describe` shows the full contract tree
+- **Rich output** -- tables, syntax-highlighted JSON, progress bars
+- **Session subshell** -- `session Analytics` opens a dedicated session for session-scoped services
+
+### CLI equivalents
+
+Every shell command has a non-interactive equivalent for scripting:
+
+```bash
+aster service ls <peer>
+aster service describe <peer> HelloService
+aster blob ls <peer>
+aster blob cat <peer> <hash>
+```
+
+See the CLI Reference for the full command reference.
+
+
+## 3. Raw transport (for custom tooling)
+
+For advanced use cases -- custom tooling, testing, or building clients in languages without a typed binding -- you can use the transport layer directly:
+
+```python
+from aster import IrohTransport, ForyCodec, SerializationMode
+
+# Open a QUIC connection
+transport = IrohTransport(connection)
+
+# Invoke by service and method name
+result = await transport.unary(
+    service="HelloService",
+    method="say_hello",
+    request=HelloRequest(name="World"),
+)
+```
+
+The raw transport still requires serializable request/response types. For truly schemaless invocation, use the shell or fetch the manifest and build payloads from the field definitions.
+
+
+## Admission flow (all approaches)
+
+Regardless of which approach you use, every consumer goes through the same admission flow:
+
+<MermaidDiagram source={"sequenceDiagram\n    participant C as Consumer\n    participant P as Producer\n    C->>P: QUIC connect (aster.consumer_admission)\n    C->>P: credential (or empty for dev mode)\n    P->>P: verify / auto-admit\n    P-->>C: services list + registry ticket\n    C->>P: QUIC connect (aster/1)\n    C->>P: RPC calls\n"} />
+
+The admission response gives the consumer:
+- **services** -- list of available services with name, version, contract_id
+- **registry_ticket** -- read-only doc ticket for full contract metadata
+- **root_pubkey** -- for independent credential verification
+
+Even in dev mode (open gate), the admission handshake runs to discover services.
+
+
+## Error handling
+
+All three approaches produce the same error types:
+
+| Error | Meaning |
+|-------|---------|
+| `PermissionError` | Admission denied (invalid credential, wrong root key) |
+| `LookupError` | Service not offered by this producer |
+| `RpcError` | Call failed (check `e.code`: NOT_FOUND, DEADLINE_EXCEEDED, INTERNAL, etc.) |
+| `ConnectionError` | QUIC connection lost |
+
+```python
+from aster import RpcError, StatusCode
+
+try:
+    resp = await hello.say_hello(HelloRequest(name=""))
+except RpcError as e:
+    if e.code == StatusCode.DEADLINE_EXCEEDED:
+        print("Call timed out")
+    elif e.code == StatusCode.PERMISSION_DENIED:
+        print("Not authorized for this method")
+```

@@ -1,0 +1,33 @@
+Build a small Aster Python service and client in the current workspace.
+
+Sources:
+- https://docs.aster.site/docs/quickstart/python
+- https://docs.aster.site/docs/bindings/python
+- https://github.com/aster-rpc/aster-rpc
+
+Read the linked Python quickstart before writing code. Use a published package
+version compatible with that guide, and record the exact Aster and Python
+versions you install. If the published package and guide disagree, identify the
+mismatch and stop rather than inventing APIs or using private dependencies.
+
+Create an isolated environment and a project containing request and response
+types, a HelloService with a say_hello method, a producer, and a consumer. The
+producer should print its Aster address. The consumer should take that address
+as configuration, call the service with the name World, and print Hello, World!
+
+Use the guide's development configuration for this local demonstration. Do not
+describe it as a production authorization setup. Do not open public firewall
+ports, commit credentials, or change machine-wide networking settings.
+
+Start the producer locally, capture its actual address, and run the consumer
+against it. Confirm the expected response using the real Aster connection. Add
+a short README with installation, startup, consumer, and shutdown commands.
+Record dependency versions so the project can be reproduced. Stop the processes
+you started after verification unless I ask you to keep them running.
+
+Report the files created, installed versions, commands run, observed response,
+and any remaining problems. If network access, native package installation, or
+execution is unavailable, report that limit; do not claim the example passed.
+
+This prompt is a draft for the documentation design preview and has not yet been
+validated in a coding harness.

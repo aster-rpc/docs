@@ -1,0 +1,279 @@
+---
+title: Configuration
+slug: "docs/reference/configuration"
+---
+
+
+Complete reference for `AsterConfig`, which controls trust, networking, storage, and connectivity for both `AsterServer` and `AsterClient`. Examples on this page use Python. The native transport bindings expose the same endpoint-level semantics; high-level language wrappers may forward a smaller subset until their config layer catches up.
+
+## Resolution order
+
+Configuration values are resolved from three layers. Each layer overrides the previous:
+
+1. **Built-in defaults** -- ephemeral key, in-memory storage, all admission gates open.
+2. **TOML config file** -- loaded via `AsterConfig.from_file("aster.toml")`.
+3. **Environment variables** -- `ASTER_*` prefixed. Always win when set.
+
+```python
+from aster import AsterConfig
+
+# Auto-load from env vars only (default when no config is passed)
+config = AsterConfig.from_env()
+
+# Load from TOML file, with env var overrides
+config = AsterConfig.from_file("aster.toml")
+
+# Inline (testing, scripts)
+config = AsterConfig(root_pubkey=pub_bytes, allow_all_consumers=True)
+```
+
+## Field reference
+
+### Trust fields
+
+| Field | Type | Default | Env var | Description |
+|-------|------|---------|---------|-------------|
+| `root_pubkey` | `bytes` or `None` | `None` | `ASTER_ROOT_PUBKEY` (hex) | 32-byte ed25519 root public key. The deployment trust anchor. Highest priority. |
+| `root_pubkey_file` | `str` or `None` | `None` | `ASTER_ROOT_PUBKEY_FILE` | Path to a file containing the root public key (hex string or JSON with `"public_key"` field). |
+| `enrollment_credential_file` | `str` or `None` | `None` | `ASTER_ENROLLMENT_CREDENTIAL` | Path to a JSON enrollment credential signed by the root key. Required for consumers in production. |
+| `enrollment_credential_iid` | `str` or `None` | `None` | `ASTER_ENROLLMENT_CREDENTIAL_IID` | Cloud Instance Identity Document token. Required when the credential's policy includes `aster.iid_*` attributes. |
+| `allow_all_consumers` | `bool` | `False` | `ASTER_ALLOW_ALL_CONSUMERS` | Skip consumer admission gate. Set `true` for development. |
+| `allow_all_producers` | `bool` | `True` | `ASTER_ALLOW_ALL_PRODUCERS` | Skip producer admission gate. Default allows all producers. |
+
+### Connect fields (consumer-side)
+
+| Field | Type | Default | Env var | Description |
+|-------|------|---------|---------|-------------|
+| `endpoint_addr` | `str` or `None` | `None` | `ASTER_ENDPOINT_ADDR` | Producer's endpoint address. Base64-encoded `NodeAddr` or hex `EndpointId`. Required for `AsterClient`. |
+
+### Storage fields
+
+| Field | Type | Default | Env var | Description |
+|-------|------|---------|---------|-------------|
+| `storage_path` | `str` or `None` | `None` | `ASTER_STORAGE_PATH` | Path for persistent storage (FsStore). Enables docs and blobs to survive restarts. If unset, uses in-memory storage. |
+
+### Health fields
+
+| Field | Type | Default | Env var | Description |
+|-------|------|---------|---------|-------------|
+| `health_port` | `int` | `0` | `ASTER_HEALTH_PORT` | Port for health HTTP server. `0` disables the server (default). |
+| `health_host` | `str` | `127.0.0.1` | `ASTER_HEALTH_HOST` | Bind address for the health server. Use `0.0.0.0` inside containers. |
+
+### Network fields
+
+| Field | Type | Default | Env var | Description |
+|-------|------|---------|---------|-------------|
+| `secret_key` | `bytes` or `None` | `None` | `ASTER_SECRET_KEY` (base64) | 32-byte node identity key. Determines the stable `EndpointId`. If unset, a fresh key is generated each run. |
+| `relay_mode` | `str` or `None` | `None` | `ASTER_RELAY_MODE` | Relay server mode: `"default"`, `"disabled"`, or a custom relay URL. |
+| `bind_addr` | `str` or `None` | `None` | `ASTER_BIND_ADDR` | Local bind address (e.g. `"0.0.0.0:9000"`). |
+| `enable_monitoring` | `bool` | `False` | `ASTER_ENABLE_MONITORING` | Enable endpoint monitoring/metrics. |
+| `enable_hooks` | `bool` | `False` | `ASTER_ENABLE_HOOKS` | Enable connection hooks (Gate 0). Auto-set when admission is active. |
+| `hook_timeout_ms` | `int` | `5000` | `ASTER_HOOK_TIMEOUT_MS` | Timeout for hook decisions in milliseconds. |
+| `clear_ip_transports` | `bool` | `False` | `ASTER_CLEAR_IP_TRANSPORTS` | Disable direct IP transports. |
+| `clear_relay_transports` | `bool` | `False` | `ASTER_CLEAR_RELAY_TRANSPORTS` | Disable relay transports. |
+| `portmapper_config` | `str` or `None` | `None` | `ASTER_PORTMAPPER_CONFIG` | Port mapper configuration: `"disabled"` or other. |
+| `proxy_url` | `str` or `None` | `None` | `ASTER_PROXY_URL` | HTTP proxy URL for relay connections. |
+| `proxy_from_env` | `bool` | `False` | `ASTER_PROXY_FROM_ENV` | Read proxy settings from `HTTP_PROXY`/`HTTPS_PROXY` env vars. |
+
+### QUIC transport tuning fields
+
+These fields map to iroh/noq QUIC transport configuration. They are all optional. Leave them unset unless the process is a high-throughput server and you have measured a bottleneck; unset values preserve iroh's defaults.
+
+| Field | Type | Default | Env var | Description |
+|-------|------|---------|---------|-------------|
+| `transport_max_concurrent_bidi_streams` | `int` or `None` | `None` | `ASTER_TRANSPORT_MAX_CONCURRENT_BIDI_STREAMS` | Maximum incoming bidirectional QUIC streams. |
+| `transport_max_concurrent_uni_streams` | `int` or `None` | `None` | `ASTER_TRANSPORT_MAX_CONCURRENT_UNI_STREAMS` | Maximum incoming unidirectional QUIC streams. |
+| `transport_stream_receive_window` | `int` or `None` | `None` | `ASTER_TRANSPORT_STREAM_RECEIVE_WINDOW` | Per-stream receive window in bytes. |
+| `transport_receive_window` | `int` or `None` | `None` | `ASTER_TRANSPORT_RECEIVE_WINDOW` | Per-connection receive window in bytes. |
+| `transport_send_window` | `int` or `None` | `None` | `ASTER_TRANSPORT_SEND_WINDOW` | QUIC send window in bytes. |
+| `transport_max_idle_timeout_ms` | `int` or `None` | `None` | `ASTER_TRANSPORT_MAX_IDLE_TIMEOUT_MS` | Maximum idle timeout in milliseconds. Must be greater than zero when set. |
+| `transport_keep_alive_interval_ms` | `int` or `None` | `None` | `ASTER_TRANSPORT_KEEP_ALIVE_INTERVAL_MS` | Keep-alive interval in milliseconds. Must be greater than zero when set. |
+| `transport_initial_mtu` | `int` or `None` | `None` | `ASTER_TRANSPORT_INITIAL_MTU` | Initial UDP payload size before MTU discovery. Must be at least 1200 when set. |
+| `transport_datagram_receive_buffer_size` | `int` or `None` | `None` | `ASTER_TRANSPORT_DATAGRAM_RECEIVE_BUFFER_SIZE` | Incoming application datagram buffer in bytes. `0` disables incoming datagrams. |
+| `transport_datagram_send_buffer_size` | `int` or `None` | `None` | `ASTER_TRANSPORT_DATAGRAM_SEND_BUFFER_SIZE` | Outgoing application datagram buffer in bytes. |
+| `transport_send_fairness` | `bool` or `None` | `None` | `ASTER_TRANSPORT_SEND_FAIRNESS` | Enable fair scheduling across send streams at the same priority. |
+| `transport_enable_segmentation_offload` | `bool` or `None` | `None` | `ASTER_TRANSPORT_ENABLE_SEGMENTATION_OFFLOAD` | Enable UDP generic segmentation offload when the platform supports it. |
+
+### Identity fields
+
+| Field | Type | Default | Env var | Description |
+|-------|------|---------|---------|-------------|
+| `identity_file` | `str` or `None` | `None` | `ASTER_IDENTITY_FILE` | Path to `.aster-identity` TOML file. Defaults to `.aster-identity` in the current working directory if it exists. |
+
+## TOML file format
+
+The TOML config file uses four sections: `[trust]`, `[connect]`, `[storage]`, and `[network]`.
+
+```toml
+[trust]
+root_pubkey_file = "~/.aster/root_pub.key"
+allow_all_consumers = false
+allow_all_producers = true
+
+[connect]
+endpoint_addr = "aGVsbG8gd29ybGQ..."
+
+[storage]
+path = "/var/lib/aster"
+
+[network]
+relay_mode = "default"
+bind_addr = "0.0.0.0:9000"
+# secret_key = "<base64-encoded 32 bytes>"
+enable_monitoring = false
+enable_hooks = false
+hook_timeout_ms = 5000
+
+# Optional QUIC transport tuning. Omit these to use iroh defaults.
+transport_receive_window = 8000000
+transport_send_window = 8000000
+transport_initial_mtu = 1452
+transport_enable_segmentation_offload = true
+```
+
+## Environment variables
+
+All environment variables use the `ASTER_` prefix. Boolean values accept `true`/`false`, `1`/`0`, `yes`/`no`, or `on`/`off` (case-insensitive).
+
+```bash
+# Trust
+ASTER_ROOT_PUBKEY=<64-char hex string>
+ASTER_ROOT_PUBKEY_FILE=~/.aster/root_pub.key
+ASTER_ENROLLMENT_CREDENTIAL=consumer.token
+ASTER_ENROLLMENT_CREDENTIAL_IID=<cloud IID token>
+ASTER_ALLOW_ALL_CONSUMERS=false
+ASTER_ALLOW_ALL_PRODUCERS=true
+
+# Connect
+ASTER_ENDPOINT_ADDR=<base64 NodeAddr>
+
+# Storage
+ASTER_STORAGE_PATH=/var/lib/aster
+
+# Health
+ASTER_HEALTH_PORT=0            # Port for health HTTP server (0=disabled, default)
+ASTER_HEALTH_HOST=127.0.0.1   # Bind address for health server
+
+# Network
+ASTER_SECRET_KEY=<base64-encoded 32 bytes>
+ASTER_RELAY_MODE=default
+ASTER_BIND_ADDR=0.0.0.0:9000
+ASTER_ENABLE_MONITORING=false
+ASTER_ENABLE_HOOKS=false
+ASTER_HOOK_TIMEOUT_MS=5000
+ASTER_TRANSPORT_MAX_CONCURRENT_BIDI_STREAMS=512
+ASTER_TRANSPORT_MAX_CONCURRENT_UNI_STREAMS=128
+ASTER_TRANSPORT_STREAM_RECEIVE_WINDOW=2000000
+ASTER_TRANSPORT_RECEIVE_WINDOW=8000000
+ASTER_TRANSPORT_SEND_WINDOW=8000000
+ASTER_TRANSPORT_MAX_IDLE_TIMEOUT_MS=60000
+ASTER_TRANSPORT_KEEP_ALIVE_INTERVAL_MS=10000
+ASTER_TRANSPORT_INITIAL_MTU=1452
+ASTER_TRANSPORT_DATAGRAM_RECEIVE_BUFFER_SIZE=1000000
+ASTER_TRANSPORT_DATAGRAM_SEND_BUFFER_SIZE=1000000
+ASTER_TRANSPORT_SEND_FAIRNESS=true
+ASTER_TRANSPORT_ENABLE_SEGMENTATION_OFFLOAD=true
+
+# Identity
+ASTER_IDENTITY_FILE=.aster-identity
+```
+
+## `.aster-identity` file format
+
+The `.aster-identity` file is a TOML file generated by `aster enroll node`. It contains the node's secret key and one or more peer enrollment entries:
+
+```toml
+[node]
+secret_key = "<base64-encoded 32-byte secret key>"
+
+[[peers]]
+name = "billing-producer"
+role = "producer"
+root_pubkey = "<64-char hex>"
+type = "policy"
+expires_at = 1735689599
+endpoint_id = "<64-char hex>"
+attributes = {}
+signature = "<hex-encoded signature>"
+
+[[peers]]
+name = "analytics-consumer"
+role = "consumer"
+root_pubkey = "<64-char hex>"
+type = "policy"
+expires_at = 1735689599
+attributes = {}
+signature = "<hex-encoded signature>"
+```
+
+`AsterServer` and `AsterClient` auto-detect this file in the current working directory. Use `identity=` to point to a specific file, and `peer=` to select a peer entry by name:
+
+```python
+server = AsterServer(services=[...], identity=".aster-identity", peer="billing-producer")
+client = AsterClient(identity=".aster-identity", peer="analytics-consumer")
+```
+
+## Debugging configuration
+
+Use `print_config()` to display the resolved configuration with provenance (which source each value came from):
+
+```python
+config = AsterConfig.from_env()
+config.print_config()
+```
+
+Output:
+
+```
+  [trust]
+    root_pubkey                 : <not set>                          (default)
+    root_pubkey_file            : ~/.aster/root_pub.key              (ASTER_ROOT_PUBKEY_FILE)
+    enrollment_credential_file  : <not set>                          (default)
+    allow_all_consumers         : True                               (ASTER_ALLOW_ALL_CONSUMERS)
+    allow_all_producers         : True                               (default)
+  [connect]
+    endpoint_addr               : aGVsbG8gd29ybGQ...                 (ASTER_ENDPOINT_ADDR)
+  [network]
+    secret_key                  : ****...a1b2c3d4                    (ASTER_SECRET_KEY)
+    relay_mode                  : <default>                          (default)
+    bind_addr                   : <any>                              (default)
+    enable_monitoring           : False                              (default)
+    enable_hooks                : False                              (default)
+  [storage]
+    path                        : <in-memory>                        (default)
+```
+
+Sensitive fields (`secret_key`, `enrollment_credential_file`) are masked in the output. The `root_pubkey` is public and shown in full.
+
+For JSON output, pass `json=True`:
+
+```python
+config.print_config(json=True)
+```
+
+## Logging and observability
+
+| Field | Env var | TOML | Default | Description |
+|-------|---------|------|---------|-------------|
+| `log_format` | `ASTER_LOG_FORMAT` | `[logging] format` | `"text"` | `"json"` for structured (k8s/ELK) or `"text"` for dev |
+| `log_level` | `ASTER_LOG_LEVEL` | `[logging] level` | `"info"` | `"debug"`, `"info"`, `"warning"`, `"error"` |
+| `log_mask` | `ASTER_LOG_MASK` | `[logging] mask` | `true` | Mask sensitive fields (keys, credentials) in logs |
+
+```toml
+# aster.toml
+[logging]
+format = "json"
+level = "info"
+mask = true
+```
+
+See the [Observability guide](/docs/guides/observability) for full details on structured logging, OTel metrics, and distributed tracing.
+
+## Dev mode auto-detection
+
+When no explicit `root_pubkey_file` is configured and admission is needed, `AsterConfig` generates an ephemeral root keypair automatically. In this mode:
+
+- `AsterServer` sets `allow_all_consumers=True` so consumers can connect without credentials.
+- A warning is logged: `"Dev mode: allow_all_consumers=True (ephemeral root key)."`
+
+To switch to production mode, set `ASTER_ROOT_PUBKEY_FILE` to a file containing the root public key. This disables ephemeral key generation and requires consumers to present valid enrollment credentials.

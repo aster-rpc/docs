@@ -1,0 +1,142 @@
+---
+title: TypeScript
+slug: "docs/bindings/typescript"
+---
+
+
+import { Badge } from '@astrojs/starlight/components';
+
+<Badge text="TypeScript binding" variant="success" />
+
+## Status
+
+Shipping 0.1.2 on npm as `@aster-rpc/aster`. The TypeScript binding mirrors the Python binding's feature set using NAPI-RS for the transport layer and pure TypeScript for the RPC framework.
+
+**Packages:**
+- `@aster-rpc/transport` — NAPI-RS native addon (Iroh P2P transport)
+- `@aster-rpc/aster` — Pure TypeScript RPC framework
+
+**Runtime support:** Node.js 20+, Bun 1.0+, Deno (via Node compat)
+
+## Install
+
+```bash
+# bun (recommended)
+bun add @aster-rpc/aster
+
+# npm
+npm install @aster-rpc/aster
+
+# pnpm
+pnpm add @aster-rpc/aster
+```
+
+The `@aster-rpc/transport` native addon is included as a dependency and auto-selects the correct binary for your platform.
+
+## Quick example
+
+A producer hosts a service over QUIC; a consumer connects by address.
+
+```typescript
+// service.ts
+import { Service, Rpc, AsterServer } from '@aster-rpc/aster';
+
+class HelloRequest {
+  name = "";
+  constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
+}
+
+class HelloResponse {
+  message = "";
+  constructor(init?: Partial<HelloResponse>) { if (init) Object.assign(this, init); }
+}
+
+@Service({ name: "Hello", version: 1 })
+export class HelloService {
+  @Rpc()
+  async sayHello(req: HelloRequest): Promise<HelloResponse> {
+    return new HelloResponse({ message: `Hello, ${req.name}!` });
+  }
+}
+
+// Producer (run `npx aster-gen` first)
+const server = new AsterServer({
+  services: [new HelloService()],
+});
+await server.start();
+console.log("Producer ready at:", server.address);
+await server.serve();
+```
+
+```typescript
+// consumer.ts
+import { AsterClientWrapper } from '@aster-rpc/aster';
+
+const client = new AsterClientWrapper({
+  address: process.env.ASTER_ENDPOINT_ADDR!,
+});
+await client.connect();
+
+// The dynamic proxy speaks JSON and needs no local type definitions --
+// methods are discovered from the producer's published contract.
+const hello = client.proxy("Hello");
+const reply = await hello.sayHello({ name: "TypeScript" });
+console.log(reply.message); // "Hello, TypeScript!"
+
+await client.close();
+```
+
+For full type safety on the consumer side, generate a typed client with `aster contract gen-client <address> --lang typescript --out ./clients` and import it instead of using `client.proxy()`.
+
+## Architecture
+
+```
+@aster-rpc/aster          Pure TypeScript — decorators, client, server,
+                          interceptors, framing, protocol types
+        |
+@aster-rpc/transport      NAPI-RS native addon — IrohNode, QUIC streams,
+        |                  blobs, docs, gossip
+        |
+aster_transport_core       Shared Rust crate (same as Python binding)
+        |
+iroh crates                QUIC, blobs, docs, gossip
+```
+
+The TypeScript binding uses the same Rust core as the Python binding. Wire-level compatibility is guaranteed — a Python server can serve TypeScript clients and vice versa.
+
+## Key design decisions
+
+- **TC39 Stage 3 decorators** (`@Service`, `@Rpc`, `@ServerStream`, etc.) — compiles to standard JS, no runtime decorator support needed.
+- **Proxy-based client stubs** — `createClient(ServiceClass, transport)` returns a typed client with full IDE autocompletion.
+- **AsyncIterator/AsyncGenerator** for all streaming patterns.
+- **Fory XLANG** (`@apache-fory/core`) for cross-language wire compatibility with Python.
+- **NAPI-RS** for the native transport layer — same pattern as SWC, Prisma, Turbo.
+
+## Features
+
+All features from the Python binding are available:
+
+| Feature | Status |
+|---------|--------|
+| All 4 streaming patterns (unary, server, client, bidi) | Done |
+| TC39 decorators (@Service, @Rpc, @ServerStream, etc.) | Done |
+| Proxy-based typed client stubs | Done |
+| 9 interceptors (deadline, retry, metrics, rate-limit, etc.) | Done |
+| Contract identity (BLAKE3 hashing) | Done |
+| Session-scoped services (CALL/CANCEL multiplexing) | Done |
+| Structured logging (JSON/text, correlation, masking) | Done |
+| Health endpoints (/healthz, /readyz, /metrics) | Done |
+| Configuration (env vars, TOML) | Done |
+| IrohTransport (QUIC) | Done |
+| LocalTransport (in-process testing) | Done |
+
+## WASM (future)
+
+Iroh supports WASM compilation (since v0.33) with all connections routed through relay servers. The `AsterTransport` interface is designed to support a future `IrohWasmTransport` for browser and edge runtimes. Connections remain end-to-end encrypted even via relay.
+
+## Further reading
+
+- [Quickstart](/docs/quickstart/python) — step-by-step guide (Python + TypeScript tabs)
+- [TypeScript Server Reference](/docs/bindings/typescript/server) — AsterServer API
+- [TypeScript Client Reference](/docs/bindings/typescript/client) — createClient API
+- [Cross-Language Interop](/docs/examples/cross-language) — Python ↔ TypeScript

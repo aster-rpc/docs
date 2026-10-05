@@ -1,0 +1,37 @@
+Build the first chapter of Aster's MissionControl example in Python in the
+current workspace.
+
+Sources:
+- https://docs.aster.site/docs/quickstart/mission-control
+- https://github.com/aster-rpc/aster-rpc/tree/main/examples/python/mission_control
+- https://docs.aster.site/docs/bindings/python
+
+Read the walkthrough and inspect the public example source. Focus on the first
+agent check-in and its unary status call. Use the request types, service name,
+method name, and response shape defined there rather than making up a different
+contract. Do not implement later chapters yet.
+
+Use published package versions compatible with the source you select, and
+record the Aster release, Python version, and example source revision. If they
+do not agree, report the mismatch and stop instead of silently rewriting the
+API or depending on a private repository.
+
+Create an isolated environment, the necessary shared types and service, a
+control-plane process, an agent process, and a README with exact commands.
+Have the control plane print its actual Aster address, and configure the agent
+to call that address. Use the tutorial's development configuration for a local
+demonstration and document that it is not a production security setup. Do not
+open public firewall ports or alter machine-wide networking settings.
+
+Run both processes locally and verify the chapter's expected check-in/status
+response over Aster. Document what was observed. Stop the processes you started
+after verification unless I ask you to keep them running. Describe how to repeat
+the demonstration across two machines, but do not claim that was tested unless
+you actually have access to and use two machines.
+
+Report the files created, versions and source revision, commands run, actual
+response, and anything that prevented successful execution. Do not substitute
+a mocked response for a working Aster call.
+
+This prompt is a draft for the documentation design preview and has not yet been
+validated in a coding harness.

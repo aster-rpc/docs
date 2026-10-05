@@ -45,3 +45,5 @@ _private/
 .claude/
 CLAUDE.md
 _internal/
+# Astro generated files
+.astro/

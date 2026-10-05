@@ -1,0 +1,33 @@
+---
+const { kind = 'contract' } = Astro.props;
+---
+<figure class="docs-diagram not-content">
+  {kind === 'contract' ? (
+    <svg viewBox="0 0 640 350" role="img" aria-labelledby="contract-title contract-desc">
+      <title id="contract-title">Contract and type references</title>
+      <desc id="contract-desc">A ServiceContract references three MethodDefs. The first method references two TypeDefs. Each references a FieldDef, and one field references another TypeDef.</desc>
+      <g class="edges"><path d="M320 57 V86 H100 V104 M320 86 V104 M320 86 H540 V104 M100 146 V170 H60 V187 M100 170 H225 V187 M60 229 V262 M225 229 V262 M225 304 H424"/></g>
+      <g class="boxes"><rect x="241" y="15" width="158" height="42" rx="5"/><rect x="30" y="104" width="140" height="42" rx="5"/><rect x="250" y="104" width="140" height="42" rx="5"/><rect x="470" y="104" width="140" height="42" rx="5"/><rect x="5" y="187" width="110" height="42" rx="5"/><rect x="170" y="187" width="110" height="42" rx="5"/><rect x="5" y="262" width="110" height="42" rx="5"/><rect x="170" y="262" width="110" height="42" rx="5"/><rect x="424" y="283" width="110" height="42" rx="5"/></g>
+      <g class="labels"><text x="320" y="42">ServiceContract</text><text x="100" y="131">MethodDef</text><text x="320" y="131">MethodDef</text><text x="540" y="131">MethodDef</text><text x="60" y="214">TypeDef</text><text x="225" y="214">TypeDef</text><text x="60" y="289">FieldDef</text><text x="225" y="289">FieldDef</text><text x="479" y="310">TypeDef</text></g>
+    </svg>
+  ) : (
+    <svg viewBox="0 0 640 310" role="img" aria-labelledby="mission-title mission-desc">
+      <title id="mission-title">MissionControl services and callers</title>
+      <desc id="mission-desc">Agent 1, Agent 2, and the Operator CLI call the shared MissionControl and per-connection AgentSession services. Agents can use a relay when required for connectivity.</desc>
+      <g class="edges"><path d="M165 62 H220 V113 H310 M165 139 H220 M165 219 H245 V205 H310 M220 139 V205 H310 M245 219 V113 H310"/><path class="hint" d="M88 260 V245 H25 V62 H35 M25 139 H35"/></g>
+      <g class="boxes"><rect x="35" y="40" width="130" height="44" rx="5"/><rect x="35" y="117" width="130" height="44" rx="5"/><rect x="35" y="197" width="130" height="44" rx="5"/><rect x="310" y="75" width="280" height="76" rx="5"/><rect x="310" y="168" width="280" height="76" rx="5"/><rect x="35" y="260" width="130" height="36" rx="5"/></g>
+      <g class="labels"><text x="100" y="67">Agent 1</text><text x="100" y="144">Agent 2</text><text x="100" y="224">Operator CLI</text><text x="450" y="103">MissionControl · shared</text><text class="small" x="450" y="130">status · logs · metrics</text><text x="450" y="195">AgentSession · per connection</text><text class="small" x="450" y="221">register · heartbeat · commands</text><text class="small" x="100" y="283">Relay fallback</text></g>
+    </svg>
+  )}
+  <figcaption>{kind === 'contract' ? 'Each definition references the types it uses. Changes propagate through those references.' : 'Shared services and agent sessions use the same peer-to-peer transport.'}</figcaption>
+</figure>
+<style>
+  .docs-diagram { margin: 1.5rem 0; border: 1px solid var(--sl-color-gray-5); border-radius: 6px; padding: 1rem; background: var(--sl-color-gray-6); overflow-x: auto; }
+  svg { display: block; width: 100%; min-width: 400px; }
+  .edges path { fill: none; stroke: var(--sl-color-accent); stroke-width: 1.5; }
+  .edges .hint { stroke-dasharray: 4 4; stroke: var(--sl-color-gray-3); }
+  .boxes rect { fill: var(--sl-color-black); stroke: var(--sl-color-gray-4); }
+  .labels text { fill: var(--sl-color-white); font: 12px var(--sl-font-mono); text-anchor: middle; }
+  .labels .small { font-size: 10px; fill: var(--sl-color-gray-2); }
+  figcaption { margin-top: .5rem; color: var(--sl-color-gray-2); font-size: .75rem; line-height: 1.6; }
+</style>

@@ -1,0 +1,153 @@
+---
+title: Client
+slug: "docs/bindings/typescript/client"
+---
+
+
+# TypeScript Client Reference
+
+## AsterClientWrapper
+
+The primary way to connect to an Aster server over QUIC. Handles consumer admission, service discovery, and the proxy/typed-client surface.
+
+```typescript
+import { AsterClientWrapper } from '@aster-rpc/aster';
+
+const client = new AsterClientWrapper({
+  address: "aster1...",
+});
+await client.connect();
+
+// Dynamic proxy: speaks JSON, no local types needed
+const hello = client.proxy("Hello");
+const reply = await hello.sayHello({ name: "World" });
+console.log(reply.message);
+
+await client.close();
+```
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `address` | `string` | `undefined` | `aster1...` ticket of the producer to connect to |
+| `transport` | `AsterTransport` | `undefined` | Pre-built transport (for tests). Mutually exclusive with `address`. |
+| `config` | `Partial<AsterConfig>` | `{}` | Override config values |
+| `identity` | `string` | `undefined` | Path to a `.aster-identity` TOML file |
+| `peer` | `string` | `undefined` | Peer name to load from the identity file |
+| `enrollmentCredentialFile` | `string` | `undefined` | Path to a `.cred` enrollment credential for trusted-mode servers |
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `connect()` | `Promise<void>` | Run consumer admission against the producer and discover services |
+| `proxy(name)` | `ProxyClient` | Dynamic proxy for a service. Speaks JSON; no codegen needed. |
+| `client(ServiceClass)` | `Promise<typed client>` | Typed client built from a generated client class |
+| `session(name)` | `Promise<SessionProxyClient>` | Open a multiplexed session against a session-scoped service |
+| `close()` | `Promise<void>` | Close the underlying QUIC connections |
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `connected` | `boolean` | Whether `connect()` has succeeded |
+| `services` | `ServiceSummary[]` | Services discovered during admission |
+
+## Lower-level: createClient
+
+For tests and advanced use, `createClient` builds a typed stub over an existing transport. This is what `AsterClientWrapper.client()` uses internally.
+
+```typescript
+import { createClient } from '@aster-rpc/aster';
+
+const client = createClient(HelloService, transport);
+const result = await client.sayHello(new HelloRequest({ name: "World" }));
+```
+
+### Signature
+
+```typescript
+function createClient<T extends new (...args: any[]) => any>(
+  serviceClass: T,
+  transport: AsterTransport,
+  options?: ClientOptions,
+): AsterClient<InstanceType<T>>;
+```
+
+### ClientOptions
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `timeout` | `number` | `undefined` | Default timeout in seconds for all calls |
+| `metadata` | `Record<string, string>` | `{}` | Default metadata for all calls |
+
+### Per-call options
+
+Every method accepts an optional `CallOptions` as the last argument:
+
+```typescript
+const result = await client.sayHello(req, {
+  metadata: { 'x-request-id': '123' },
+  deadlineEpochMs: Date.now() + 30_000,
+});
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `metadata` | `Record<string, string>` | Per-call metadata (merged with defaults) |
+| `deadlineEpochMs` | `number` | Absolute deadline as epoch milliseconds |
+| `serializationMode` | `number` | Override serialization mode |
+| `contractId` | `string` | Contract identity for verification |
+| `callId` | `string` | Correlation ID (auto-generated if omitted) |
+
+## Streaming
+
+### Server streaming
+
+```typescript
+// Returns AsyncIterable — use for-await-of
+for await (const item of client.watchItems(req)) {
+  console.log(item);
+}
+```
+
+### Client streaming
+
+```typescript
+// Pass an async generator as the request
+const result = await client.uploadBatch(async function*() {
+  yield new Item({ name: "one" });
+  yield new Item({ name: "two" });
+}());
+```
+
+### Bidirectional streaming
+
+```typescript
+const channel = client.chat();
+await channel.send(new Message({ text: "hello" }));
+await channel.send(new Message({ text: "world" }));
+await channel.close();
+
+for await (const reply of channel) {
+  console.log(reply);
+}
+```
+
+## Transport implementations
+
+| Transport | Use case | Package |
+|-----------|----------|---------|
+| `LocalTransport` | Testing (in-process, no network) | `@aster-rpc/aster` |
+| `IrohTransport` | Production (QUIC over Iroh P2P) | `@aster-rpc/aster` |
+
+```typescript
+// Local (testing)
+import { LocalTransport, ServiceRegistry } from '@aster-rpc/aster';
+const transport = new LocalTransport(registry);
+
+// Remote (production) — requires NAPI native addon
+import { IrohTransport } from '@aster-rpc/aster';
+const transport = new IrohTransport(connection, codec);
+```
