@@ -38,7 +38,7 @@ Expose your service to Claude or any MCP-compatible AI agent with a single comma
 aster mcp <endpoint-addr>
 ```
 
-Every `@rpc` method becomes a tool the agent can discover and call. No OpenAPI specs, no REST gateways — the contract is the tool definition.
+The bridge derives tool definitions from the published contract. Credentials and local filters determine which methods it exposes.
 
 See [AI Agent Integration (MCP)](/docs/guides/mcp-integration) for security layers and configuration.
 
@@ -50,7 +50,7 @@ The quickstart used a single unary method. Aster supports:
 - **Server streaming** (`@server_stream`) — stream results to the caller
 - **Client streaming** (`@client_stream`) — receive a stream of requests
 - **Bidirectional streaming** (`@bidi_stream`) — both sides stream concurrently
-- **Session-scoped services** — stateful, per-peer instances
+- **Session-scoped services** — stateful instances identified by connection, session ID, and service
 
 See [Defining Services and Types](/docs/guides/services) for the full decorator reference.
 
@@ -59,17 +59,7 @@ See [Defining Services and Types](/docs/guides/services) for the full decorator 
 
 In dev mode, Aster auto-admits every peer. For production you need identity and trust:
 
-```bash
-# Generate a root key
-aster trust keygen --out root.key
-
-# Sign credentials for your producer and consumers
-aster trust sign --root-key root.key --type producer --out producer.token
-aster trust sign --root-key root.key --type consumer --out consumer.token
-
-# Enroll a node with its credential
-aster enroll node --profile prod --rcan producer.token
-```
+Follow the trust configuration guide to create persistent endpoint identities and issue scoped credentials.
 
 See [Trust Model](/docs/concepts/trust-model) for the full four-gate authorization model, and [Configuration](/docs/reference/configuration) for all settings.
 

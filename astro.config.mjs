@@ -5,7 +5,7 @@ export default defineConfig({
   site: 'https://docs.aster.site',
   integrations: [starlight({
     title: 'Aster',
-    description: 'Documentation for the enterprise peer-to-peer application SDK.',
+    description: 'Documentation for the Aster peer-to-peer application SDK preview.',
     logo: { src: './src/assets/aster-mark.svg', alt: 'Aster' },
     favicon: '/img/favicon.ico',
     customCss: ['./src/styles/aster.css'],
@@ -92,19 +92,19 @@ export default defineConfig({
     "label": "Guides",
     "items": [
       {
-        "label": "Defining Services and Types",
+        "label": "Defining services and types",
         "slug": "docs/guides/services"
       },
       {
-        "label": "Define a Service",
+        "label": "Define a service",
         "slug": "docs/guides/define-a-service"
       },
       {
-        "label": "Dial a Service",
+        "label": "Dial a service",
         "slug": "docs/guides/dial-a-service"
       },
       {
-        "label": "TypeScript Build Setup",
+        "label": "TypeScript build setup",
         "slug": "docs/guides/typescript-build-setup"
       },
       {
@@ -112,7 +112,7 @@ export default defineConfig({
         "slug": "docs/guides/observability"
       },
       {
-        "label": "AI Agent Integration (MCP)",
+        "label": "AI agent integration (MCP)",
         "slug": "docs/guides/mcp-integration"
       },
       {
@@ -156,15 +156,15 @@ export default defineConfig({
     "label": "Examples",
     "items": [
       {
-        "label": "Hello Service",
+        "label": "Hello service",
         "slug": "docs/examples/hello-service"
       },
       {
-        "label": "Cross-Language Interop",
+        "label": "Cross-language interop",
         "slug": "docs/examples/cross-language"
       },
       {
-        "label": "Data-Heavy Row Mode",
+        "label": "Data-heavy ROW mode",
         "slug": "docs/examples/data-heavy-row-mode"
       }
     ],
@@ -174,7 +174,7 @@ export default defineConfig({
     "label": "Reference",
     "items": [
       {
-        "label": "API Reference",
+        "label": "API reference",
         "slug": "docs/reference/api"
       },
       {
@@ -186,7 +186,7 @@ export default defineConfig({
         "slug": "docs/reference/configuration"
       },
       {
-        "label": "CLI Reference",
+        "label": "CLI reference",
         "slug": "docs/reference/cli"
       },
       {

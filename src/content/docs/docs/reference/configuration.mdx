@@ -4,13 +4,13 @@ slug: "docs/reference/configuration"
 ---
 
 
-Complete reference for `AsterConfig`, which controls trust, networking, storage, and connectivity for both `AsterServer` and `AsterClient`. Examples on this page use Python. The native transport bindings expose the same endpoint-level semantics; high-level language wrappers may forward a smaller subset until their config layer catches up.
+Reference for selected `AsterConfig` fields, which controls trust, networking, storage, and connectivity for both `AsterServer` and `AsterClient`. Examples on this page use Python. Consult each binding's API for its supported fields.
 
 ## Resolution order
 
 Configuration values are resolved from three layers. Each layer overrides the previous:
 
-1. **Built-in defaults** -- ephemeral key, in-memory storage, all admission gates open.
+1. **Built-in defaults** -- no configured identity key and in-memory storage. Runtime development-mode handling is described below.
 2. **TOML config file** -- loaded via `AsterConfig.from_file("aster.toml")`.
 3. **Environment variables** -- `ASTER_*` prefixed. Always win when set.
 
@@ -38,13 +38,13 @@ config = AsterConfig(root_pubkey=pub_bytes, allow_all_consumers=True)
 | `enrollment_credential_file` | `str` or `None` | `None` | `ASTER_ENROLLMENT_CREDENTIAL` | Path to a JSON enrollment credential signed by the root key. Required for consumers in production. |
 | `enrollment_credential_iid` | `str` or `None` | `None` | `ASTER_ENROLLMENT_CREDENTIAL_IID` | Cloud Instance Identity Document token. Required when the credential's policy includes `aster.iid_*` attributes. |
 | `allow_all_consumers` | `bool` | `False` | `ASTER_ALLOW_ALL_CONSUMERS` | Skip consumer admission gate. Set `true` for development. |
-| `allow_all_producers` | `bool` | `True` | `ASTER_ALLOW_ALL_PRODUCERS` | Skip producer admission gate. Default allows all producers. |
+| `allow_all_producers` | `bool` | `True` | `ASTER_ALLOW_ALL_PRODUCERS` | Skip producer admission gate. Python currently supports only `True`. |
 
 ### Connect fields (consumer-side)
 
 | Field | Type | Default | Env var | Description |
 |-------|------|---------|---------|-------------|
-| `endpoint_addr` | `str` or `None` | `None` | `ASTER_ENDPOINT_ADDR` | Producer's endpoint address. Base64-encoded `NodeAddr` or hex `EndpointId`. Required for `AsterClient`. |
+| `endpoint_addr` | `str` or `None` | `None` | `ASTER_ENDPOINT_ADDR` | Producer's endpoint address: `aster1...` ticket, encoded `NodeAddr`, or endpoint ID. |
 
 ### Storage fields
 
@@ -56,7 +56,7 @@ config = AsterConfig(root_pubkey=pub_bytes, allow_all_consumers=True)
 
 | Field | Type | Default | Env var | Description |
 |-------|------|---------|---------|-------------|
-| `health_port` | `int` | `0` | `ASTER_HEALTH_PORT` | Port for health HTTP server. `0` disables the server (default). |
+| `health_port` | `int` | `0` | `ASTER_HEALTH_PORT` | Port for health HTTP server. `0` disables the listener by default; `health_enabled=True` enables an ephemeral port. |
 | `health_host` | `str` | `127.0.0.1` | `ASTER_HEALTH_HOST` | Bind address for the health server. Use `0.0.0.0` inside containers. |
 
 ### Network fields
@@ -102,7 +102,7 @@ These fields map to iroh/noq QUIC transport configuration. They are all optional
 
 ## TOML file format
 
-The TOML config file uses four sections: `[trust]`, `[connect]`, `[storage]`, and `[network]`.
+The example below uses `[trust]`, `[connect]`, `[storage]`, and `[network]`. Additional settings use `[health]` and `[logging]`.
 
 ```toml
 [trust]
@@ -271,9 +271,9 @@ See the [Observability guide](/docs/guides/observability) for full details on st
 
 ## Dev mode auto-detection
 
-When no explicit `root_pubkey_file` is configured and admission is needed, `AsterConfig` generates an ephemeral root keypair automatically. In this mode:
+When no root public key is configured and admission is needed, `AsterConfig` generates an ephemeral root keypair automatically. In this mode:
 
 - `AsterServer` sets `allow_all_consumers=True` so consumers can connect without credentials.
 - A warning is logged: `"Dev mode: allow_all_consumers=True (ephemeral root key)."`
 
-To switch to production mode, set `ASTER_ROOT_PUBKEY_FILE` to a file containing the root public key. This disables ephemeral key generation and requires consumers to present valid enrollment credentials.
+To require consumer enrollment, configure the root public key and keep `allow_all_consumers=False`. Configuring a root key does not override an explicit permission to allow all consumers. Review the [trust model](/docs/concepts/trust-model/) before deployment.

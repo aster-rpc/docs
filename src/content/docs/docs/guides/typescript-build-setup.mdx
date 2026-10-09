@@ -1,5 +1,5 @@
 ---
-title: TypeScript Build Setup
+title: TypeScript build setup
 slug: "docs/guides/typescript-build-setup"
 ---
 
@@ -12,17 +12,49 @@ the metadata the runtime needs — field shapes, wire type mappings, method
 signatures, and contract identity hashes.
 
 This replaces the need to pass `{ request, response }` to every decorator.
-You write clean decorators; the scanner extracts types from the AST.
+The scanner extracts request and response types from the AST.
 
 ## Install
 
-```bash
-npm install @aster-rpc/aster
+Aster **0.3.893 is a public preview**. This version is available from [Forgejo packages](https://forge.emrul.dev/Aster/-/packages); it was not published to npmjs.org.
+
+Add this scope mapping to your project's `.npmrc`:
+
+```ini
+@aster-rpc:registry=https://forge.emrul.dev/api/packages/Aster/npm/
 ```
+
+Then install the pinned preview and TypeScript compiler:
+
+```bash
+npm install @aster-rpc/aster@0.3.893
+npm install --save-dev typescript@^5 @types/node
+```
+
 
 `aster-gen` ships as the `aster-gen` bin inside `@aster-rpc/aster` — no
 extra package needed. TypeScript is a peer dependency (bring your own
 version).
+
+
+### Configure the compiler
+
+Set `"type": "module"` in `package.json`. For these examples, use this `tsconfig.json` so JavaScript and generated metadata are emitted beside their TypeScript source files:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["*.ts"]
+}
+```
+
+Leave `experimentalDecorators` unset. Run `npx aster-gen`, then `npx tsc`, and run the emitted `.js` files with Node.js. If you use a separate output directory, run from that directory so the generated metadata is available in the working directory, or pass it explicitly to `AsterServer`.
 
 ## Run the scanner
 
@@ -112,11 +144,11 @@ source files during dev.
 
 ```typescript
 // webpack.config.ts
-import { AsterGenPlugin } from '@aster-rpc/aster/webpack-plugin';
+import { AsterGenWebpackPlugin } from '@aster-rpc/aster/webpack-plugin';
 
 export default {
   plugins: [
-    new AsterGenPlugin({
+    new AsterGenWebpackPlugin({
       project: 'tsconfig.json',
       out: 'aster-rpc.generated.ts',
     }),
@@ -151,13 +183,13 @@ Plain `number` maps to `float64`. For narrower types (int32, uint16, etc.),
 use branded types:
 
 ```typescript
-import { i32, u64, f32 } from '@aster-rpc/aster';
+import { WireType, i32, u64, f32 } from '@aster-rpc/aster';
 
 @WireType("myapp/Metrics")
 class Metrics {
-  count: i32 = 0;       // → int32
-  total_bytes: u64 = 0n; // → uint64
-  avg_latency: f32 = 0;  // → float32
+  count: i32 = 0 as i32;       // → int32
+  total_bytes: u64 = 0n as u64; // → uint64
+  avg_latency: f32 = 0 as f32;  // → float32
 }
 ```
 

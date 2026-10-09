@@ -3,93 +3,46 @@ title: Aster vs gRPC
 slug: "docs/overview/aster-vs-grpc"
 ---
 
+[gRPC](https://grpc.io/) and Aster offer typed RPC with unary and streaming calls. Their deployment models differ: gRPC commonly connects to named network services, while Aster connects to peers identified by public keys.
 
-Aster is not a drop-in replacement for gRPC. The two frameworks are built on different assumptions about where services run, how they are identified, and what infrastructure is available. This page provides a detailed, honest comparison.
+Aster 0.3.893 is a public preview. Assess its compatibility and operational requirements before adopting it for production workloads.
 
-## Comparison table
+## Comparison
 
 | Dimension | gRPC | Aster |
 | --- | --- | --- |
-| **Transport** | HTTP/2 over TCP | QUIC over UDP |
-| **Identity** | TLS certificates (hostname-bound) | ed25519 public key (`EndpointId`) |
-| **Connection target** | hostname:port | Cryptographic public key |
-| **Serialization** | Protocol Buffers | Apache Fory (XLANG, NATIVE, ROW modes) with JSON escape hatch for debugging |
-| **Service definition** | `.proto` files + code generation | Language-native decorators/annotations |
-| **Infrastructure** | Load balancers, service mesh, DNS, certificate authorities | Peer-to-peer; no mandatory infrastructure |
-| **NAT traversal** | None (requires routable addresses) | Built-in hole-punching + relay fallback |
-| **Head-of-line blocking** | Yes (HTTP/2 streams share one TCP connection) | No (QUIC provides independent per-stream flow control) |
-| **Connection migration** | No (TCP connections bound to IP 4-tuple) | Yes (QUIC connections bound to connection ID) |
-| **Discovery** | External (Consul, etcd, Kubernetes, DNS) | Built-in decentralised registry (iroh-docs + iroh-gossip) |
-| **Trust model** | External (mTLS via CA, OAuth, JWT, API keys) | Built-in four-gate model (offline root key, enrollment credentials, capabilities) |
-| **Object graphs** | Not supported (protobuf is tree-structured) | Native support (shared references, cycles, polymorphism) |
-| **Serialization performance** | Baseline | 10--170x faster (Fory benchmarks, workload-dependent) |
-| **Streaming patterns** | Unary, server-stream, client-stream, bidi-stream | Same four patterns, plus session-scoped services (stateful multi-method sessions) |
-| **Ecosystem maturity** | Excellent (10+ years, broad language support, extensive tooling) | Greenfield (Python reference implementation, other languages planned) |
+| Transport | Commonly HTTP/2 over TCP | Iroh QUIC with direct paths and relay fallback |
+| Connection target | Usually hostname and port | Endpoint public key with network hints |
+| Authentication | Configurable transport and call credentials | Endpoint-key authentication plus configured enrollment and method permissions |
+| Serialization | Protocol Buffers by default; custom codecs available | Fory XLANG by default; additional modes depend on binding support |
+| Service definition | Usually `.proto` and generated stubs | Language-native service definitions and canonical contract IDs |
+| Network reachability | Supplied by the deployment network | Iroh attempts NAT traversal; relays can provide fallback |
+| Discovery | Deployment-specific name resolution and registries | Explicit endpoint addresses or Aster's peer-replicated registry |
+| Calls | Unary, server-streaming, client-streaming, bidirectional streaming | The same four patterns plus session-scoped services |
+| Language surfaces | Established implementations and tooling across many languages | Preview surfaces for Rust, Python, TypeScript, Go, Java, and .NET |
 
-## Transport
+## Connectivity
 
-gRPC runs on HTTP/2 over TCP. This works well in data centers with stable, routable addresses. It does not work well behind NATs, on mobile networks, or across organizational boundaries without VPNs or tunneling.
+gRPC fits deployments that already provide routable services, name resolution, certificates, and HTTP-aware operational tooling. It does not require a service mesh or load balancer; those are deployment choices.
 
-Aster runs on QUIC over UDP via iroh. QUIC provides independent per-stream flow control (no head-of-line blocking), connection migration (connections survive network changes), and UDP-based transport (NAT traversal via hole-punching). iroh adds ed25519 identity, relay fallback for connections that cannot be established directly, and local network discovery.
+Aster uses [Iroh](https://iroh.computer/) to establish encrypted QUIC connections to endpoint identities. Iroh attempts direct paths and can forward encrypted traffic through relays. Aster therefore needs less application-managed addressing in some cross-network deployments, but it still depends on reachable network paths and any configured discovery or relay services.
 
-## Identity
+QUIC streams avoid TCP's connection-wide delivery ordering across streams. They still share connection-level flow control, congestion control, and network capacity. Connection migration can preserve a connection across path changes when the new path is reachable. See [transport](/docs/concepts/transport/).
 
-gRPC identifies services by hostname and port. Authentication is provided by TLS certificates, which bind a hostname to a public key. The certificate authority, certificate issuance, and certificate rotation are separate infrastructure concerns.
+## Contracts and payloads
 
-Aster identifies endpoints by ed25519 public key. The key *is* the identity -- it does not depend on DNS, does not expire unless the operator rotates it, and does not require a certificate authority. The QUIC handshake authenticates both sides of the connection using these keys. No separate authentication step is needed.
+Protocol Buffers provides an explicit schema and a well-established code-generation workflow. Aster derives contracts from application code and uses a BLAKE3 `contract_id` to identify the canonical interface. Cross-language definitions must agree on wire names, types, and settings.
 
-## Serialization
+Aster uses [Apache Fory](https://fory.apache.org/) for XLANG payloads. Additional serialization modes have binding-specific limits. Dynamic tools can convert JSON input to XLANG; JSON wire mode has been retired. Encrypted packets remain encrypted regardless of serialization format. Measure representative payloads and end-to-end calls when comparing performance. See [serialization](/docs/concepts/serialization/).
 
-gRPC uses Protocol Buffers, which requires writing `.proto` schema files, running a code generator, and using the generated types in your application. Protobuf supports tree-structured messages but not object graphs with shared references or cycles.
+## Sessions and permissions
 
-Aster uses Apache Fory, which serializes native language objects directly. There is no IDL file and no code generation step (though Fory IDL is available as an optional authoring format for cross-team contracts). Fory supports object graphs with shared references, cycles, and polymorphism. Three modes serve different workloads:
+Aster's session-scoped services retain an instance across typed method calls that carry the same connection-scoped session ID. This can simplify stateful interactions, though applications remain responsible for recovery after a session ends.
 
-- **XLANG**: Cross-language with type tags. The default for services that may have consumers in different languages.
-- **NATIVE**: Maximum performance within a single language. Useful for same-language microservices or internal communication.
-- **ROW**: Zero-copy columnar format for data-heavy workloads.
+Aster also includes enrollment and method capability checks. These require an operator-defined trust policy; permissive development settings do not provide deployment authorization. See [session-scoped services](/docs/concepts/session-scoped-services/) and the [trust model](/docs/concepts/trust-model/).
 
-## Service definition
+## Choosing a framework
 
-gRPC is contract-first: you write a `.proto` file, generate stubs, and implement the generated interfaces. This provides a single source of truth for the API but introduces a build step and generated code that may not be idiomatic in every language.
+gRPC is a useful starting point when your team already relies on its schema tooling, HTTP integrations, or established language ecosystem. Aster is worth evaluating when endpoint identity, cross-network connectivity, or stateful peer sessions are central requirements and you can work within a public preview's stability limits.
 
-Aster is code-first: you write your service using your language's native constructs. The framework extracts a canonical definition at registration time. The `contract_id` (BLAKE3 hash of the canonical definition) is the cross-language interop point. Two implementations in different languages that define the same interface produce the same `contract_id`.
-
-## Infrastructure requirements
-
-gRPC assumes infrastructure: DNS for name resolution, load balancers for traffic distribution, a service mesh for mTLS and observability, and a service registry for discovery. This infrastructure is mature and well-understood, but it must exist and be maintained.
-
-Aster requires no infrastructure. Endpoints connect directly using public keys. Discovery is peer-to-peer. Trust is rooted in an offline key, not a certificate authority. This does not mean Aster *cannot* work with infrastructure -- it means it does not *require* it.
-
-## Streaming and sessions
-
-Both frameworks support the same four RPC patterns: unary, server-streaming, client-streaming, and bidirectional streaming.
-
-Aster adds session-scoped services: a service instance that lives for the duration of a QUIC stream, maintaining state across multiple sequential typed method calls. This is useful for stateful interactions (agent task sessions, multiplayer lobbies, collaborative editing) that would otherwise require external session stores or manual envelope-based dispatch over a bidi stream.
-
-## When to use gRPC
-
-gRPC is the right choice when:
-
-- You operate in a data center or cloud environment with stable infrastructure.
-- Your organization has invested in the HTTP ecosystem (load balancers, API gateways, observability tools that understand HTTP/2).
-- You need broad language support today -- gRPC has mature implementations in 10+ languages.
-- Your team prefers contract-first workflows with `.proto` as the single source of truth.
-- You need mature tooling for API versioning, backward compatibility checking, and documentation generation.
-
-## When to use Aster
-
-Aster is the right choice when:
-
-- Your services run behind NATs, firewalls, or carrier-grade NATs where establishing direct connectivity is hard.
-- You need peer-to-peer communication without centralized infrastructure.
-- Strong identity matters: you want to know *who* you are talking to, not just *where* they are.
-- You want zero-infrastructure deployments with built-in trust, discovery, and connectivity.
-- Your workloads are session-oriented or stateful (agent interactions, collaborative editing, game lobbies).
-- You need cross-language serialization with object-graph support or high-performance same-language serialization.
-- You are building for edge, IoT, mesh networking, or multi-cloud environments where cloud-native assumptions do not hold.
-
-## The honest tradeoff
-
-gRPC has ecosystem maturity that Aster does not: a decade of tooling, observability integration, service mesh support, load balancer awareness, and production hardening across thousands of organizations. Aster is greenfield software with a Python reference implementation and other languages planned.
-
-If your environment fits the cloud-native model and you need production-grade tooling today, gRPC is the pragmatic choice. If your environment does not fit that model -- or if you are building something where identity, connectivity, and trust should be properties of the framework rather than external infrastructure -- Aster offers a fundamentally different foundation.
+Try [your first service](/docs/quickstart/python/) or read the [gRPC migration guide](/docs/guides/port-from-grpc/).

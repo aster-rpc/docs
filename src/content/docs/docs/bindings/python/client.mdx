@@ -7,7 +7,7 @@ slug: "docs/bindings/python/client"
 import MermaidDiagram from '@components/MermaidDiagram.astro';
 
 
-# AsterClient Usage
+# AsterClient reference
 
 `AsterClient` is the consumer-side counterpart to `AsterServer`. It handles the admission handshake and RPC client construction behind a single async context manager, with all configuration driven by `AsterConfig` (environment variables or TOML file).
 
@@ -28,7 +28,7 @@ asyncio.run(main())
 ```
 
 ```bash
-ASTER_ENDPOINT_ADDR=<from producer output> python consumer.py
+ASTER_ENDPOINT_ADDR="<from producer output>" python consumer.py
 ```
 
 That's it in dev mode. `AsterClient` reads configuration from `ASTER_*` environment variables automatically.
@@ -77,25 +77,25 @@ If `identity` is omitted, `AsterClient` auto-detects `.aster-identity` in the cu
 
 **Dev mode** (no `.aster-identity`, producer has `allow_all_consumers=True`):
 ```bash
-ASTER_ENDPOINT_ADDR=<addr> python consumer.py
+ASTER_ENDPOINT_ADDR="<addr>" python consumer.py
 ```
 
 **Production with identity file** (recommended):
 ```bash
-ASTER_ENDPOINT_ADDR=<addr> python consumer.py
+ASTER_ENDPOINT_ADDR="<addr>" python consumer.py
 # .aster-identity in cwd provides the credential automatically
 ```
 
 **Production in containers** (identity file at a custom path):
 ```bash
 ASTER_IDENTITY_FILE=/etc/aster/.aster-identity \
-ASTER_ENDPOINT_ADDR=<addr> \
+ASTER_ENDPOINT_ADDR="<addr>" \
 python consumer.py
 ```
 
 **Legacy approach** (credential file without identity file -- still supported):
 ```bash
-ASTER_ENDPOINT_ADDR=<addr> \
+ASTER_ENDPOINT_ADDR="<addr>" \
 ASTER_ENROLLMENT_CREDENTIAL=consumer.token \
 python consumer.py
 ```
@@ -287,11 +287,11 @@ asyncio.run(main())
 
 ```bash
 # Production: .aster-identity provides credential + node identity
-ASTER_ENDPOINT_ADDR=<producer addr> python consumer.py
+ASTER_ENDPOINT_ADDR="<producer addr>" python consumer.py
 
 # Or in a container with a custom identity file path:
 ASTER_IDENTITY_FILE=/etc/aster/.aster-identity \
-ASTER_ENDPOINT_ADDR=<producer addr> \
+ASTER_ENDPOINT_ADDR="<producer addr>" \
 python consumer.py
 ```
 

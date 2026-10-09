@@ -1,10 +1,10 @@
 ---
-title: Hello Service
+title: Hello service
 slug: "docs/examples/hello-service"
 ---
 
 
-The simplest possible Aster service: a greeting RPC. Three files, no credentials, no infrastructure. This example is Python-specific.
+This Python example defines a greeting RPC in three files and uses open development admission. Peers need a reachable direct or relay path.
 
 ## The service definition
 
@@ -97,7 +97,7 @@ Open two terminals. No credentials or configuration files are needed.
 **Terminal 1 -- producer:**
 
 ```bash
-pip install aster-rpc
+# Install the preview wheel for your platform first; see the quickstart.
 python producer.py
 ```
 

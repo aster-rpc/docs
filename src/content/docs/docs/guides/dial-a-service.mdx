@@ -1,5 +1,5 @@
 ---
-title: Dial a Service
+title: Dial a service
 description: Three ways to connect to an Aster service -- typed client, dynamic shell, and raw transport.
 slug: "docs/guides/dial-a-service"
 ---
@@ -7,7 +7,7 @@ slug: "docs/guides/dial-a-service"
 import MermaidDiagram from '@components/MermaidDiagram.astro';
 
 
-# Dial a Service
+# Dial a service
 
 There are three ways to call an Aster service, depending on your situation:
 
@@ -66,7 +66,7 @@ For internal services, the types often live in a shared module imported by both 
 For dev mode (open gate), just set the address:
 
 ```bash
-ASTER_ENDPOINT_ADDR=<addr> python consumer.py
+ASTER_ENDPOINT_ADDR="<addr>" python consumer.py
 ```
 
 For production, use an `.aster-identity` file:
@@ -76,7 +76,7 @@ For production, use an `.aster-identity` file:
 aster enroll node --profile prod --role consumer --name my-consumer
 
 # Then just run -- the identity file provides everything:
-ASTER_ENDPOINT_ADDR=<addr> python consumer.py
+ASTER_ENDPOINT_ADDR="<addr>" python consumer.py
 ```
 
 See [AsterClient](/docs/bindings/python/client) for the full Python API reference.
@@ -121,12 +121,11 @@ producer:/services/HelloService$ ./say_hello name="World"
 
 ### Dynamic invocation without local types
 
-The shell does not just discover methods -- it can invoke them too, without any
-local type definitions. When connected to a peer, the shell reads contract
+The shell invokes methods without local type definitions. When connected to a peer, the shell reads contract
 manifests and synthesizes wire-compatible types at runtime. Field names, types,
 defaults, and Fory wire tags are all extracted from the manifest, so the shell
-can build correctly serialized requests on the fly. This means you can explore
-AND invoke any service from the shell without installing the service's client
+can build correctly serialized requests on the fly. This means you can inspect
+and invoke compatible services from the shell without installing the service's client
 package.
 
 ### How it discovers methods
@@ -160,7 +159,7 @@ aster blob ls <peer>
 aster blob cat <peer> <hash>
 ```
 
-See the CLI Reference for the full command reference.
+See the [CLI reference](/docs/reference/cli) for command details.
 
 
 ## 3. Raw transport (for custom tooling)

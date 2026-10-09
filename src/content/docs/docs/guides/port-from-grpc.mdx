@@ -17,7 +17,7 @@ This guide maps gRPC concepts to their Aster equivalents and walks through a mig
 | `protoc` code generator | Not needed | Aster is code-first. The class definition is the contract. |
 | gRPC channel | Aster endpoint (`NodeAddr`) | Identity-addressed, not hostname-addressed. |
 | HTTP/2 transport | QUIC transport | NAT-traversing, peer-to-peer capable. |
-| Load balancer | Direct peer-to-peer | No infrastructure required for connectivity. |
+| Load balancer | Endpoint address | Direct connections where possible; a reachable relay may be needed. |
 | TLS certificates | Endpoint identity (ed25519) | Built into the transport layer. No separate PKI. |
 | Service mesh sidecar | Not needed | Admission, auth, and observability are built in. |
 
@@ -163,7 +163,7 @@ class Greeter {
   </TabItem>
 </Tabs>
 
-No `.proto` file. No `protoc` step. No generated code. The class definition is the source of truth.
+The decorated class defines the contract. Python reads its annotations at runtime; TypeScript requires the `aster-gen` metadata build step.
 
 ## Step 2: Replace generated stubs with `AsterClient`
 
@@ -221,22 +221,22 @@ async with AsterServer(services=[Greeter()]) as srv:
 
 ## What changes
 
-### No code generation
-The `@service` class is the contract. There is no `.proto` file, no `protoc` step, and no generated stubs to distribute.
+### Contract definitions
+The Python `@service` class defines the contract. TypeScript uses `aster-gen` to preserve type metadata before compilation.
 
-### No HTTP/2
+### QUIC transport
 Aster runs over QUIC (RFC 9000) on UDP. Connections traverse NATs via relay servers without port forwarding or load balancer configuration.
 
-### No load balancers
+### Endpoint addressing
 Peers connect directly by identity. The `endpoint_addr` encodes the node's public key and relay hints, not a hostname. Connections are authenticated at the transport layer by the node's ed25519 identity key.
 
-### No separate TLS setup
+### Transport authentication
 QUIC connections are encrypted by default. The node's identity key provides mutual authentication. No certificate authorities or certificate rotation workflows.
 
 ## What stays the same
 
 ### Four RPC patterns
-Aster supports the same four patterns as gRPC: unary, server streaming, client streaming, and bidirectional streaming. The semantics are identical.
+Aster supports the same four patterns as gRPC: unary, server streaming, client streaming, and bidirectional streaming. Each pattern has binding-specific cancellation, buffering, and error behavior; verify those details when porting.
 
 ### Interceptors
 Aster has a middleware chain equivalent to gRPC interceptors. Built-in interceptors cover deadlines, retry, circuit breaking, auth, audit logging, metrics, and compression.
@@ -282,10 +282,10 @@ gRPC authentication typically uses metadata headers and custom interceptors (or 
 - **mTLS certificates** become **endpoint identity keys**. Each node has an ed25519 keypair embedded in the QUIC transport. No separate certificate infrastructure.
 - **Authorization interceptors** become **capability requirements**. Declare `@service(requires=...)` or `@rpc(requires=...)` and the framework enforces them at the method dispatch layer.
 
-## What you gain
+## Deployment changes
 
 - **NAT traversal.** Peers behind NATs connect via relay servers without port forwarding. The relay is part of the transport, not a separate proxy.
 - **Peer-to-peer.** Once a direct path is established (via hole punching or local discovery), traffic flows directly between peers with no intermediary.
 - **Content-addressed contracts.** Each service version gets a deterministic `contract_id` (a hash of its interface). Consumers and producers can verify wire compatibility without running code.
 - **Built-in discovery.** The admission handshake returns the full service list. No separate service registry or DNS-based discovery required.
-- **No infrastructure.** No load balancers, no service mesh sidecars, no certificate authorities. The transport handles connectivity; the framework handles auth.
+- **Relay availability.** Deployments still need a reachable network path and may depend on a public or self-hosted relay.

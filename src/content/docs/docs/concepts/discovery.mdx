@@ -4,7 +4,7 @@ slug: "docs/concepts/discovery"
 ---
 
 
-Aster includes a decentralised service registry built on iroh's data primitives. There is no central server, no Consul, no etcd. Registry state replicates across participants using the same peer-to-peer infrastructure that carries RPC traffic.
+Aster includes a peer-replicated service registry built on [Iroh](https://iroh.computer/) documents, blobs, and gossip. Participating peers synchronize registry state and use its endpoint leases to locate services.
 
 ## Three iroh primitives
 
@@ -97,11 +97,11 @@ The flow from "I need this service" to "I have a connection" is:
 1. The consumer knows a `contract_id` (from its compiled client stub or configuration).
 2. The consumer looks up `contracts/{contract_id}` in the registry docs namespace.
 3. The entry contains an `ArtifactRef` with a `collection_hash`.
-4. The consumer fetches the blob collection (if not already cached) and verifies `blake3(contract.xlang) == contract_id`.
+4. The consumer fetches the blob collection (if not already cached) and verifies `blake3(contract.bin) == contract_id`.
 5. The consumer looks up `services/{name}/contracts/{contract_id}/endpoints/` for active leases.
 6. The consumer selects an endpoint and dials it using the `NodeAddr` from the lease.
 
-All of this happens over the same iroh infrastructure. The registry lookup uses iroh-docs sync, the artifact fetch uses iroh-blobs transfer, and the RPC call uses iroh QUIC. No separate discovery infrastructure is needed.
+Registry lookup uses document sync, artifact fetch uses blob transfer, and calls use the RPC protocol. Peers still need a way to join the namespace and reach its participants.
 
 ## Channels and versions
 
@@ -111,7 +111,7 @@ Services can organize their contracts into channels and versions:
 - **Channels** (`stable`, `canary`, `dev`) are mutable pointers to a `contract_id`. Promoting a canary to stable is a single docs write that updates the `stable` channel pointer.
 - **Tags** are arbitrary labels that point to a `contract_id`, useful for custom workflows.
 
-This model supports gradual rollout, blue-green deployment, and experimentation without any infrastructure beyond the registry itself.
+Applications can use channel updates to select contracts during a rollout.
 
 ## Gossip notifications
 
@@ -123,10 +123,10 @@ Key gossip events:
 - **LeaseUpdate** -- an endpoint has come online, gone offline, or updated its metadata.
 - **ChannelUpdate** -- a channel pointer has changed (e.g., a new version promoted to stable).
 
-Gossip is a hint mechanism, not a source of truth. If a gossip message is missed, the consumer will still see the change the next time it syncs the docs namespace. Gossip accelerates propagation; docs provides durability.
+Gossip notifications prompt participants to refresh document state. After a missed notification, a later successful document sync can provide the update.
 
-## No central server
+## Replication limits
 
-The registry has no central server, no leader election, and no single point of failure. Every participant holds a replica of the docs namespace and syncs with peers. Writes are concurrent and conflict-free (iroh-docs uses CRDTs). Blob collections are immutable and content-addressed, so any peer that has the data can serve it.
+Registry reads reflect the state available to the local replica. Connectivity loss or delayed synchronization can leave it stale. Lease expiry provides a freshness check, but an advertised lease does not guarantee that a provider is reachable or that a call will succeed.
 
-This means the registry works in the same environments as Aster itself: behind NATs, across organizational boundaries, without centralized infrastructure. The registry is part of the mesh, not a dependency external to it.
+See [contract identity](/docs/concepts/contract-identity/) for artifact verification and [dial a service](/docs/guides/dial-a-service/) for client connections.

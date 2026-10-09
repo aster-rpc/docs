@@ -3,129 +3,27 @@ title: Serialization
 slug: "docs/concepts/serialization"
 ---
 
+Aster uses [Apache Fory](https://fory.apache.org/) for RPC payloads. The interoperable payload mode is XLANG. All bindings use a separate binary envelope, AEv1, for stream headers, call headers, and status trailers.
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+## Cross-language payloads
 
-Aster uses [Apache Fory](https://fury.apache.org) for serialization. Fory is a high-performance, cross-language serialization framework that operates on native language objects -- no IDL compilation required, no generated code to maintain.
+XLANG registers application types under wire tags such as `myapp.models/TaskAssignment`. Producer and consumer must agree on the tag and field schema. Aster's XLANG settings enable compatible mode and disable reference tracking to match the shared Rust codec.
 
-## Four serialization modes
+Reference tracking is disabled, so applications must not rely on shared object identity or cyclic object graphs surviving serialization. Register the nested types your payloads require and test representative values across the bindings you use.
 
-Aster exposes four serialization modes -- three from Fory and one universal JSON escape hatch. The mode is declared per-service, with per-method override available.
+## Binding-specific modes
 
-### XLANG (cross-language)
+The Python codec also exposes NATIVE and ROW. These are Python-only modes in this preview, and should not be selected for cross-language services. NATIVE uses Fory's same-language format. ROW requires a dataclass root type and supports one root type per codec; it uses a row encoder for field-oriented access.
 
-XLANG is the default mode. Every serialized type carries a wire tag -- a canonical string like `"myapp.models/TaskAssignment"` -- that allows any Fory-supported language to decode the payload. XLANG mode supports the full range of Fory's type system: primitives, strings, collections, nested objects, shared references, cycles, and polymorphism.
+JSON serialization mode has been retired. Dynamic tools can accept JSON as user input and convert it to typed XLANG payloads using a contract schema. JSON input to a tool does not imply JSON on the RPC wire.
 
-Use XLANG when:
-- Producer and consumer may be in different languages.
-- You need cross-language interoperability without code generation.
-- You want a single wire format that any participant can decode.
+## Wire type tags
 
-XLANG is the required mode for services published to the decentralised registry, since any language implementation may discover and call them.
-
-### NATIVE (single-language)
-
-NATIVE mode uses the language's own serialization primitives -- Fory replaces pickle in Python, JDK serialization in Java, and similar mechanisms in other languages. It produces the most compact payloads and the fastest serialization, but the output is only decodable by the same language.
-
-Use NATIVE when:
-- Both sides of the call are in the same language.
-- Deployments where interoperability is second to performance.
-
-### ROW (zero-copy random access)
-
-ROW mode produces a row-oriented binary format from Fory that supports zero-copy field access. Individual fields can be read without deserializing the entire message. Useful for data-heavy workloads where the consumer reads only a subset of fields per record, or where the schema is sent once and many rows follow.
-
-Use ROW when:
-- Payloads are large and consumers often access only a few fields.
-- You're streaming many records with a stable schema (the schema is hoisted into the first frame and amortized across the stream).
-- You're integrating with columnar data systems.
-
-### JSON (debuggable, universal)
-
-JSON mode uses UTF-8 JSON for request and response payloads. All frames on a stream -- including the `StreamHeader` and `RpcStatus` trailer -- are JSON objects. Field names use camelCase.
-
-Use JSON when:
-- You want readable wire traffic for debugging (`tcpdump` / `wireshark` show payloads as plain text instead of opaque binary -- the classic gRPC pain point).
-- You're building quick prototypes with the dynamic proxy client (`client.proxy("ServiceName")`), which always speaks JSON.
-- A client is in a language without a mature Fory XLANG implementation.
-
-Clients that support Fory XLANG should prefer it for performance and payload size. JSON mode is the escape hatch, not the primary path.
-
-:::note
-The dynamic proxy client (`client.proxy("ServiceName")`) uses JSON mode automatically -- so any service that supports JSON mode can be called from the shell or from a Python/TypeScript proxy without generating a typed client first. Generated typed clients use Fory XLANG by default.
-:::
-
-## Mode selection
-
-A service declares its default serialization mode. Individual methods can override it:
-
-<Tabs syncKey="language">
-  <TabItem label="Python">
+Use explicit, identical wire tags for equivalent types in different languages:
 
 ```python
-from aster import service, rpc, SerializationMode
-
-@service(
-    name="Analytics",
-    version=1,
-    serialization=[SerializationMode.XLANG],  # service default
-)
-class AnalyticsService:
-
-    @rpc  # inherits XLANG from service
-    async def submit_event(self, req: Event) -> Ack:
-        ...
-
-    @rpc(serialization=[SerializationMode.ROW])  # override to ROW
-    async def query_metrics(self, req: MetricsQuery) -> MetricsResult:
-        ...
-```
-
-  </TabItem>
-  <TabItem label="TypeScript">
-
-```typescript
-import { Service, Rpc, SerializationMode } from '@aster-rpc/aster';
-
-@Service({
-  name: "Analytics",
-  version: 1,
-  serialization: [SerializationMode.XLANG], // service default
-})
-class AnalyticsService {
-  @Rpc() // inherits XLANG from service
-  async submitEvent(req: Event): Promise<Ack> { ... }
-
-  @Rpc({ serialization: SerializationMode.ROW }) // override to ROW
-  async queryMetrics(req: MetricsQuery): Promise<MetricsResult> { ... }
-}
-```
-
-  </TabItem>
-</Tabs>
-
-The wire protocol carries the serialization mode in each stream header. The receiver always knows how to decode the incoming payload.
-
-**Cross-language enforcement.** If the client and server are different languages (detected during the connection handshake), only XLANG, ROW, and JSON are permitted. NATIVE payloads from one language cannot be decoded by another. The framework rejects incompatible mode selections with an error rather than producing corrupt data.
-
-## Wire type tagging
-
-In XLANG mode, every type must have a canonical wire tag: a string that uniquely identifies the type across languages. The tag format is:
-
-```
-"{dotted.package}/{TypeName}"
-```
-
-For example: `"myapp.models/TaskAssignment"`, `"aster.agent/StepUpdate"`.
-
-Wire types are registered with a decorator:
-
-<Tabs syncKey="language">
-  <TabItem label="Python">
-
-```python
-from aster import wire_type
 from dataclasses import dataclass
+from aster import wire_type
 
 @wire_type("myapp.models/TaskAssignment")
 @dataclass
@@ -135,42 +33,12 @@ class TaskAssignment:
     payload: bytes
 ```
 
-  </TabItem>
-  <TabItem label="TypeScript">
+Tags are case-sensitive. Matching tags alone are insufficient: field names, types, and relevant contract settings must also agree. See [contract identity](/docs/concepts/contract-identity/) and the [TypeScript build setup](/docs/guides/typescript-build-setup/) for generated type information.
 
-```typescript
-import { WireType } from '@aster-rpc/aster';
+## Compression and encryption
 
-@WireType("myapp.models/TaskAssignment")
-class TaskAssignment {
-  taskId = "";
-  agentId = "";
-  payload = new Uint8Array();
-  constructor(init?: Partial<TaskAssignment>) { if (init) Object.assign(this, init); }
-}
-```
+The shared framing layer applies zstd compression to payloads strictly larger than the default threshold of 4096 bytes. A per-frame flag records compression so the receiver can decompress before decoding.
 
-  </TabItem>
-</Tabs>
+Transport encryption applies to every payload format. Packet captures do not expose readable application payloads merely because a tool accepts JSON input. Use application-level diagnostics when inspecting values.
 
-Other languages will use equivalent mechanisms -- annotations in Java, attributes in C#, macros in Rust.
-
-Tags are case-sensitive and must be identical across all language implementations of the same type. The namespace `_aster/*` is reserved for framework-internal types.
-
-**Auto-tagging.** During development, Fory can generate tags automatically from the class name and module path. The framework will warn when auto-generated tags are in use, since they may not be stable across languages or refactorings. Production services should use explicit tags.
-
-## Compression
-
-Aster supports zstd compression for wire payloads. Compression is applied after serialization and before framing. The default threshold is 4096 bytes -- payloads smaller than this are sent uncompressed, since the overhead of compression would outweigh the savings.
-
-Compression is transparent to the application. The stream header indicates whether compression is applied, and the receiver decompresses automatically.
-
-## Object graph support
-
-Unlike Protocol Buffers (which supports only tree-structured messages), Fory natively handles object graphs with:
-
-- **Shared references.** Two fields pointing to the same object are serialized once and reconstructed with shared identity on the receiver side.
-- **Cycles.** Circular references are handled without stack overflow or infinite recursion.
-- **Polymorphism.** A field declared as a base type can hold a subclass instance; the concrete type is preserved across serialization.
-
-This matters for domain models that naturally contain shared state or inheritance hierarchies. With protobuf, these must be flattened into tree structures with explicit ID references. With Fory, they serialize directly.
+Continue with [defining services and types](/docs/guides/services/) or [cross-language examples](/docs/examples/cross-language/).

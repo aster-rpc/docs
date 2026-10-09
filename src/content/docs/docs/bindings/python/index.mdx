@@ -8,22 +8,23 @@ import { Badge } from '@astrojs/starlight/components';
 
 <Badge text="Python binding" variant="note" />
 
-Python is the reference implementation for Aster. It provides the full RPC framework, trust model, and iroh networking stack as an async Python library.
+The Python binding wraps Aster’s shared Rust engine through PyO3 and exposes an async RPC framework.
 
 ## Status
 
-Shipping 0.1.2 on PyPI as `aster-rpc`. The Python binding is the first-class implementation and defines the reference behavior for cross-language interop. All features documented on this site are available in Python.
+The Python binding is included in the 0.3.893 public preview. The installation below uses its published Forgejo wheel.
 
 ## Installation
 
+Aster **0.3.893 is a public preview**. This version is distributed through [Forgejo packages](https://forge.emrul.dev/Aster/-/packages), rather than PyPI. Choose the wheel for your platform from the [Python artifact list](https://forge.emrul.dev/api/v1/packages/Aster/generic/aster-python/0.3.893/files): Apple Silicon macOS, Linux x86-64 or ARM64 (glibc 2.34+), or Windows x86-64.
+
+For example, on Apple Silicon macOS:
+
 ```bash
-pip install aster-rpc           # framework
-pip install aster-cli           # optional: shell, contract gen, trust commands
+python -m pip install https://forge.emrul.dev/api/packages/Aster/generic/aster-python/0.3.893/aster_rpc-0.3.893-cp39-abi3-macosx_11_0_arm64.whl
 ```
 
-**Requirements:** Python 3.9 -- 3.13, macOS / Linux / Windows.
-
-The package includes a native extension (compiled Rust via PyO3), so wheels are provided for common platforms. Building from source requires a Rust toolchain and maturin.
+Use the corresponding wheel URL on other platforms. Python 3.9–3.13 is required. The optional CLI is independently versioned; see the [CLI reference](/docs/reference/cli) for installation and its validation limits.
 
 ## Quick example
 
@@ -117,7 +118,6 @@ Built-in middleware chain:
 | `RetryInterceptor` | Automatic retry for idempotent methods. |
 | `CircuitBreakerInterceptor` | Circuit breaker pattern for failing endpoints. |
 | `AuditLogInterceptor` | Log all RPC calls for audit. |
-| `MetricsInterceptor` | Collect call latency and error metrics. |
 | `CapabilityInterceptor` | Enforce `requires` capability checks. |
 
 ### Sessions

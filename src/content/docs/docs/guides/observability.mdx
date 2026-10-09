@@ -1,398 +1,109 @@
 ---
 title: Observability
-description: Logging, metrics, and tracing for Aster services
+description: Configure the shared Rust telemetry pipeline, application metrics, and health endpoints.
 slug: "docs/guides/observability"
 ---
 
+Aster’s Rust `aster-otel` pipeline owns telemetry exporters, built-in RPC metrics, tracing, and the log bridge. Language bindings configure that pipeline and provide application-level helpers. The examples below use Python and have been checked against source; this page has not been followed on a clean host for the preview.
 
-# Observability
+## Configure the pipeline
 
-Aster provides production-grade observability out of the box: structured
-logging, OpenTelemetry metrics and tracing, and request correlation. All
-features are configurable via environment variables or TOML config.
+The first Python `AsterServer` or `AsterClient` start initializes the log bridge. Network export requires exporter configuration. To configure the pipeline explicitly, call `observability.init()` before starting the first server or client:
 
-:::note
-Code examples on this page are Python. TypeScript observability support is coming soon.
-:::
+```python
+from aster import observability
 
-## Logging
-
-### Configuration
-
-| Environment variable | TOML (`aster.toml`) | Values | Default |
-|---------------------|---------------------|--------|---------|
-| `ASTER_LOG_FORMAT` | `[logging] format` | `json`, `text` | `text` |
-| `ASTER_LOG_LEVEL` | `[logging] level` | `debug`, `info`, `warning`, `error` | `info` |
-| `ASTER_LOG_MASK` | `[logging] mask` | `true`, `false` | `true` |
-
-### Text mode (development)
-
-Human-readable, colored output for local development:
-
-```
-14:30:45.123 INFO  server — connection opened [svc=Hello method=sayHello req=abc12345]
-14:30:45.128 DEBUG server — rpc completed [svc=Hello method=sayHello duration_ms=4.2]
+observability.init(
+    service_name="orders",
+    otlp_endpoint="https://otel.example.com:4318",
+    metrics=True,
+    traces=True,
+)
 ```
 
-### JSON mode (production)
+Replace the example collector address with yours. Configuration precedence is explicit initialization arguments, then `OTEL_*` and `ASTER_*` environment variables, then the `[observability]` TOML table, then defaults. A later initialization with different settings raises an error because the pipeline is shared within the process.
 
-Structured JSON for log aggregation (ELK, Datadog, Splunk, CloudWatch):
+| Setting | Purpose |
+|---|---|
+| `OTEL_SERVICE_NAME` | Service resource name |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector URL |
+| `OTEL_METRICS_EXPORTER` | `otlp`, `prometheus`, or `none` |
+| `OTEL_TRACES_EXPORTER` | `otlp` or `none` |
+| `OTEL_LOGS_EXPORTER` | `otlp` or `none`; logs export is off by default |
+| `OTEL_SDK_DISABLED` | Disable telemetry export |
+| `ASTER_LOG` | Rust log filter, such as `warn,aster=info` |
 
-```json
-{"ts":"2026-04-06T14:30:45.123Z","level":"info","logger":"aster.server","msg":"connection opened","service":"Hello","method":"sayHello","request_id":"abc12345"}
-{"ts":"2026-04-06T14:30:45.128Z","level":"debug","logger":"aster.server","msg":"rpc completed","service":"Hello","method":"sayHello","request_id":"abc12345","duration_ms":4.2,"status_code":"OK"}
-```
+The supported OTLP protocol is `http/protobuf`. Configure authentication headers through your secret management system. In Python, initialize after forking into workers; forking after initialization is unsupported.
 
-### Standard log fields
+## Logs and traces
 
-Every log entry can include these fields (when available in context):
+The Python log bridge forwards Rust events to Python’s `logging` system. Configure your handlers and formatters there. Distributed trace context travels in Aster call metadata using `traceparent`, `tracestate`, and `baggage`; outbound calls from a handler can continue the incoming trace.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `ts` | string | ISO 8601 timestamp with milliseconds |
-| `level` | string | `debug`, `info`, `warning`, `error` |
-| `logger` | string | Module path (e.g., `aster.server`) |
-| `msg` | string | Human-readable message |
-| `service` | string | RPC service name |
-| `method` | string | RPC method name |
-| `request_id` | string | Correlation ID for the call |
-| `peer` | string | Remote endpoint ID (masked) |
-| `duration_ms` | float | Call duration in milliseconds |
-| `status_code` | string | RPC status (OK, NOT_FOUND, etc.) |
-| `error` | string | Error message (on failure) |
-| `error_type` | string | Exception class name (on failure) |
-
-### Sensitive field masking
-
-When `ASTER_LOG_MASK=true` (default), sensitive values are automatically masked:
-
-- **Secrets** (`secret_key`, `private_key`, `signing_key`, `signature`, `credential_json`) — replaced with `***`
-- **Identifiers** (`root_pubkey`, `endpoint_id`, `node_id`, `contract_id`, `nonce`) — truncated to `abc1234...5678`
-
-Disable masking for debugging with `ASTER_LOG_MASK=false`.
-
-### Request correlation
-
-Every RPC call automatically sets a correlation context (via Python `contextvars`).
-All log messages within the call's async scope include `service`, `method`,
-`request_id`, and `peer` — even from deeply nested code.
+Use [OpenTelemetry](https://opentelemetry.io/) resource attributes and exporter settings to connect the shared pipeline to your collector. Application metrics and spans use the same pipeline as the built-in telemetry.
 
 ## Metrics
 
-### OpenTelemetry integration
+Built-in metrics are recorded in Rust at the RPC and admission paths. They do not require a metrics interceptor.
 
-Aster provides RED metrics (Rate, Errors, Duration) via the `MetricsInterceptor`:
+| Instrument | Kind |
+|---|---|
+| `aster.rpc.server.requests_started` | Counter |
+| `aster.rpc.server.requests_completed` | Counter |
+| `aster.rpc.server.duration` | Histogram in seconds |
+| `aster.rpc.server.in_flight` | Up-down counter |
+| `aster.rpc.client.requests_completed` | Counter |
+| `aster.rpc.client.duration` | Histogram in seconds |
+| `aster.admission.decisions` | Counter |
+| `aster.transport.bytes` | Observable counter |
 
-```python
-from aster import AsterServer
-from aster.interceptors import MetricsInterceptor
-
-server = AsterServer(
-    services=[MyService()],
-    interceptors=[MetricsInterceptor()],
-)
-```
-
-### Metric names
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `aster.rpc.started` | Counter | `service`, `method`, `pattern` | Total RPC calls started |
-| `aster.rpc.completed` | Counter | `service`, `method`, `status` | Total RPC calls completed |
-| `aster.rpc.duration` | Histogram (seconds) | `service`, `method` | Call latency distribution |
-
-The `status` label uses the RPC status code name: `OK`, `NOT_FOUND`,
-`PERMISSION_DENIED`, `INTERNAL`, etc.
-
-### In-memory fallback
-
-When OpenTelemetry is not installed, `MetricsInterceptor` still collects
-in-memory counters accessible via `snapshot()`:
+Optional application instruments can be created after initialization:
 
 ```python
-metrics = MetricsInterceptor()
-# ... after some calls ...
-print(metrics.snapshot())
-# {"started": 100, "succeeded": 95, "failed": 5, "in_flight": 0}
+from aster import metrics
+
+placed = metrics.counter("orders.placed", "Orders placed")
+latency = metrics.histogram("orders.db.duration", "Database time", unit="s")
+
+placed.add(1, {"region": "eu"})
+latency.record(0.012, {"operation": "insert"})
 ```
 
-## Tracing
+Keep attribute cardinality bounded. The default cap is 2,000 series per instrument. The accepted `auto_attrs` and custom `cardinality_limit` options have no effect in this preview.
 
-### Distributed tracing with OpenTelemetry
+## Health and readiness
 
-When the OpenTelemetry SDK is installed and configured, `MetricsInterceptor`
-creates a span for each RPC call:
-
-- **Span name:** `{service}/{method}` (e.g., `HelloService/sayHello`)
-- **Span kind:** `SERVER`
-- **Attributes:**
-
-| Attribute | Example |
-|-----------|---------|
-| `rpc.system` | `aster` |
-| `rpc.service` | `HelloService` |
-| `rpc.method` | `sayHello` |
-| `rpc.aster.pattern` | `unary` |
-| `rpc.aster.idempotent` | `false` |
-| `rpc.aster.error_code` | `NOT_FOUND` (on error) |
-
-### Span conventions
-
-Aster follows the [OpenTelemetry RPC semantic conventions](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/).
-The `rpc.system` attribute is always `aster`, distinguishing Aster spans
-from gRPC or other RPC systems in the same trace.
-
-## Kubernetes deployment
-
-### Recommended configuration
-
-```yaml
-# deployment.yaml
-env:
-  - name: ASTER_LOG_FORMAT
-    value: "json"
-  - name: ASTER_LOG_LEVEL
-    value: "info"
-  - name: ASTER_LOG_MASK
-    value: "true"
-```
-
-### Log aggregation
-
-JSON logs are directly parseable by:
-- **Fluentd / Fluent Bit** — no regex needed, direct JSON parsing
-- **Datadog Agent** — auto-detects JSON format
-- **CloudWatch Logs Insights** — query by `service`, `method`, `duration_ms`
-- **Elasticsearch / Kibana** — index on structured fields
-
-### Example queries
-
-**Slow RPCs (Kibana/Elasticsearch):**
-```
-level:info AND duration_ms:>1000
-```
-
-**Error rate by service (CloudWatch Insights):**
-```
-filter level = "error"
-| stats count(*) as errors by service
-```
-
-## Health and readiness endpoints
-
-Aster includes a lightweight HTTP health server for Kubernetes probes and
-load balancer health checks. It runs on a separate port from the QUIC RPC
-endpoint.
-
-### Setup
-
-The health server is **disabled by default** (port 0). Enable it explicitly:
-
-```python
-from aster import AsterServer
-from aster.health import HealthServer
-
-async with AsterServer(services=[...]) as srv:
-    health = HealthServer(srv, port=8080)
-    await health.start()
-    await srv.serve()
-```
-
-Or via environment variable (no code changes needed):
+The health listener uses a separate TCP port from the QUIC endpoint. Enable it for your existing service:
 
 ```bash
-ASTER_HEALTH_PORT=8080 python my_service.py
+ASTER_HEALTH_PORT=8080 python producer.py
 ```
 
-| Environment variable | Default | Description |
-|---------------------|---------|-------------|
-| `ASTER_HEALTH_PORT` | `0` (disabled) | Port for health HTTP server. Set to enable. |
-| `ASTER_HEALTH_HOST` | `127.0.0.1` | Bind address. Set `0.0.0.0` for k8s pod probes. |
+The default host is `127.0.0.1`; port `0` disables the listener unless `health_enabled` is explicitly true. `ASTER_HEALTH_HOST=0.0.0.0` permits probes from other hosts. Restrict network access to that port because metrics are unauthenticated.
 
-:::caution Bind address security
-The default bind address is `127.0.0.1` (localhost only). Only set `0.0.0.0`
-when running in a container with network isolation (e.g., Kubernetes pod).
-The health endpoint exposes operational metrics that should not be publicly accessible.
-:::
+| Route | Response |
+|---|---|
+| `GET /healthz` | JSON liveness status, HTTP 200 or 503 |
+| `GET /readyz` | JSON readiness status and named checks, HTTP 200 or 503 |
+| `GET /metrics` | Prometheus text exposition; HTTP 503 when telemetry is disabled |
 
-### Endpoints
+The listener adds a Prometheus reader to the shared pipeline. It serves built-in and application instruments at `/metrics`; `/metrics/prometheus` is not a route. Prometheus names replace dots with underscores and append units and counter suffixes where appropriate.
 
-| Endpoint | Success | Failure | Description |
-|----------|---------|---------|-------------|
-| `GET /healthz` | 200 | 503 | Liveness probe — server is running |
-| `GET /readyz` | 200 | 503 | Readiness probe — contracts published, accepting traffic |
-| `GET /metrics` | 200 | — | Full metrics snapshot (JSON) |
-| `GET /metrics/prometheus` | 200 | — | Metrics in Prometheus text exposition format |
+A server is ready after serving starts and its named readiness checks pass. New checks start failing until set true. Once a log bridge has opened, the built-in audit check also fails readiness for 30 seconds after an audit log record is dropped.
 
-### Response examples
-
-**`/healthz`:**
-```json
-{"status": "ok", "uptime_s": 1234.5}
+```bash
+curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8080/metrics
 ```
-
-**`/readyz`:**
-```json
-{"status": "ready", "services": 3, "registry": true}
-```
-
-**`/metrics`:**
-```json
-{
-  "health": {"status": "ok", "uptime_s": 1234.5},
-  "ready": {"status": "ready", "services": 3, "registry": true},
-  "connections": {
-    "active_connections": 5,
-    "total_connections": 142,
-    "active_streams": 3,
-    "total_streams": 8901
-  },
-  "admission": {
-    "consumer_admitted": 42,
-    "consumer_denied": 3,
-    "consumer_errors": 0,
-    "producer_admitted": 2,
-    "producer_denied": 0,
-    "producer_errors": 0,
-    "last_admission_ms": 12.3
-  },
-  "rpc": {
-    "started": 8901,
-    "succeeded": 8850,
-    "failed": 51,
-    "in_flight": 0
-  }
-}
-```
-
-### Kubernetes probes
-
-```yaml
-# deployment.yaml
-livenessProbe:
-  httpGet:
-    path: /healthz
-    port: 8080
-  initialDelaySeconds: 5
-  periodSeconds: 10
-
-readinessProbe:
-  httpGet:
-    path: /readyz
-    port: 8080
-  initialDelaySeconds: 10
-  periodSeconds: 5
-```
-
-### Exec probes (no HTTP server)
-
-If you prefer not to run an HTTP server, use exec probes:
-
-```python
-# health_check.py
-from aster.health import check_health, check_ready
-import sys
-sys.exit(0 if check_health(server) else 1)
-```
-
-## Connection and admission metrics
-
-### Connection metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `active_connections` | Gauge | Currently open peer connections |
-| `total_connections` | Counter | Total connections since startup |
-| `active_streams` | Gauge | Currently active RPC streams |
-| `total_streams` | Counter | Total streams since startup |
-
-### Admission metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `consumer_admitted` | Counter | Consumers successfully admitted |
-| `consumer_denied` | Counter | Consumer admission denied |
-| `consumer_errors` | Counter | Consumer admission errors |
-| `producer_admitted` | Counter | Producers successfully admitted |
-| `producer_denied` | Counter | Producer admission denied |
-| `last_admission_ms` | Gauge | Duration of last admission handshake |
-
-## Grafana dashboard
-
-A pre-built Grafana dashboard template is included at `ops/grafana-dashboard.json`.
-Import it into Grafana for instant visibility:
-
-**Panels included:**
-- Request rate (by service and method)
-- Error rate and error percentage gauge
-- Latency percentiles (p50, p95, p99)
-- In-flight requests
-- Active connections
-- Admission decisions over time
-- Request rate by service (bar chart)
-
-**To import:**
-1. In Grafana, go to Dashboards > Import
-2. Upload `ops/grafana-dashboard.json`
-3. Select your Prometheus data source
-4. The dashboard uses OTel metric names (`aster_rpc_started_total`, etc.)
-
-## Rate limiting
-
-The `RateLimitInterceptor` enforces token-bucket rate limits at multiple
-granularities. Add it to your server's interceptor chain:
-
-```python
-from aster.interceptors import RateLimitInterceptor
-
-rate_limiter = RateLimitInterceptor(
-    global_rps=1000,          # whole-server cap
-    per_service_rps=500,      # per service name
-    per_method_rps=100,       # per individual method
-    per_peer_rps=50,          # per connected peer
-)
-
-server = AsterServer(
-    services=[MyService()],
-    interceptors=[rate_limiter, MetricsInterceptor()],
-)
-```
-
-Each bucket refills independently at its configured rate. When a request
-exceeds any applicable limit, the interceptor returns `RESOURCE_EXHAUSTED`
-with a `Retry-After` hint in the error metadata.
 
 ## Graceful shutdown
 
-`AsterServer` supports graceful shutdown so in-flight RPCs can complete before
-the process exits.
+`AsterServer.drain(grace_period=10.0)` asks the RPC server to stop accepting work and gives in-flight requests a bounded period to complete. Call `close()` afterward or let the async context manager close it. Applications connect their own shutdown mechanism to these methods.
 
-```python
-async with AsterServer(services=[MyService()]) as srv:
-    # Install handlers for SIGTERM and SIGINT
-    srv.install_signal_handlers()
-    await srv.serve()
-```
+Call `observability.flush()` to request a telemetry flush and `observability.shutdown()` when releasing the process’s pipeline references. Exporter timeouts can leave flushing in the background; these calls do not establish durable audit delivery.
 
-When a signal arrives, `srv.drain()` is called automatically:
+## Next steps
 
-1. The server stops accepting new connections and new RPC calls.
-2. In-flight RPCs are given a grace period (default 30 seconds) to complete.
-3. After the grace period, remaining calls are cancelled and the server shuts down.
-
-You can also trigger a drain programmatically:
-
-```python
-await srv.drain(timeout_s=15)
-```
-
-## TOML configuration example
-
-```toml
-# aster.toml
-
-[logging]
-format = "json"
-level = "info"
-mask = true
-```
+- [Configuration](/docs/reference/configuration) — environment and TOML settings
+- [Python server reference](/docs/bindings/python/server) — server lifecycle
+- [Trust model](/docs/concepts/trust-model) — audit and access boundaries

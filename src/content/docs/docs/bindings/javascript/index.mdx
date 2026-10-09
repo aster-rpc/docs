@@ -10,25 +10,29 @@ import { Badge } from '@astrojs/starlight/components';
 
 ## Status
 
-Shipping 0.1.2 on npm as `@aster-rpc/aster`. The TypeScript binding mirrors the Python binding's feature set using NAPI-RS for the transport layer and pure TypeScript for the RPC framework.
+The TypeScript binding is part of the 0.3.893 public preview. It uses NAPI-RS for the shared Rust transport and TypeScript for the RPC framework.
 
 **Packages:**
 - `@aster-rpc/transport` — NAPI-RS native addon (Iroh P2P transport)
 - `@aster-rpc/aster` — Pure TypeScript RPC framework
 
-**Runtime support:** Node.js 20+, Bun 1.0+, Deno (via Node compat)
+**Runtime requirement:** Node.js 20+. The examples use the TypeScript compiler before running JavaScript.
 
 ## Install
 
+Aster **0.3.893 is a public preview**. This version is available from [Forgejo packages](https://forge.emrul.dev/Aster/-/packages); it was not published to npmjs.org.
+
+Add this scope mapping to your project's `.npmrc`:
+
+```ini
+@aster-rpc:registry=https://forge.emrul.dev/api/packages/Aster/npm/
+```
+
+Then install the pinned preview and TypeScript compiler:
+
 ```bash
-# bun (recommended)
-bun add @aster-rpc/aster
-
-# npm
-npm install @aster-rpc/aster
-
-# pnpm
-pnpm add @aster-rpc/aster
+npm install @aster-rpc/aster@0.3.893
+npm install --save-dev typescript@^5 @types/node
 ```
 
 The `@aster-rpc/transport` native addon is included as a dependency and auto-selects the correct binary for your platform.
@@ -39,14 +43,16 @@ A producer hosts a service over QUIC; a consumer connects by address.
 
 ```typescript
 // service.ts
-import { Service, Rpc, AsterServer } from '@aster-rpc/aster';
+import { Service, Rpc, WireType, AsterServer } from '@aster-rpc/aster';
 
-class HelloRequest {
+@WireType("hello/HelloRequest")
+export class HelloRequest {
   name = "";
   constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
 }
 
-class HelloResponse {
+@WireType("hello/HelloResponse")
+export class HelloResponse {
   message = "";
   constructor(init?: Partial<HelloResponse>) { if (init) Object.assign(this, init); }
 }
@@ -77,9 +83,9 @@ const client = new AsterClientWrapper({
 });
 await client.connect();
 
-// The dynamic proxy speaks JSON and needs no local type definitions --
+// The dynamic proxy builds XLANG requests from the published contract --
 // methods are discovered from the producer's published contract.
-const hello = client.proxy("Hello");
+const hello = await client.proxy("Hello");
 const reply = await hello.sayHello({ name: "TypeScript" });
 console.log(reply.message); // "Hello, TypeScript!"
 
@@ -102,7 +108,7 @@ aster_transport_core       Shared Rust crate (same as Python binding)
 iroh crates                QUIC, blobs, docs, gossip
 ```
 
-The TypeScript binding uses the same Rust core as the Python binding. Wire-level compatibility is guaranteed — a Python server can serve TypeScript clients and vice versa.
+The TypeScript binding uses the same Rust core as the Python binding. Python and TypeScript services can interoperate when their wire tags, field types, method names, and serialization modes agree.
 
 ## Key design decisions
 
@@ -114,14 +120,14 @@ The TypeScript binding uses the same Rust core as the Python binding. Wire-level
 
 ## Features
 
-All features from the Python binding are available:
+The binding includes these RPC features:
 
 | Feature | Status |
 |---------|--------|
 | All 4 streaming patterns (unary, server, client, bidi) | Done |
 | TC39 decorators (@Service, @Rpc, @ServerStream, etc.) | Done |
 | Proxy-based typed client stubs | Done |
-| 9 interceptors (deadline, retry, metrics, rate-limit, etc.) | Done |
+| Interceptors (deadline, retry, rate limiting, and others) | Available |
 | Contract identity (BLAKE3 hashing) | Done |
 | Session-scoped services (CALL/CANCEL multiplexing) | Done |
 | Structured logging (JSON/text, correlation, masking) | Done |
@@ -129,10 +135,6 @@ All features from the Python binding are available:
 | Configuration (env vars, TOML) | Done |
 | IrohTransport (QUIC) | Done |
 | LocalTransport (in-process testing) | Done |
-
-## WASM (future)
-
-Iroh supports WASM compilation (since v0.33) with all connections routed through relay servers. The `AsterTransport` interface is designed to support a future `IrohWasmTransport` for browser and edge runtimes. Connections remain end-to-end encrypted even via relay.
 
 ## Further reading
 

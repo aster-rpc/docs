@@ -7,7 +7,7 @@ slug: "docs/bindings/python/server"
 import MermaidDiagram from '@components/MermaidDiagram.astro';
 
 
-# AsterServer Deep Dive
+# AsterServer reference
 
 `AsterServer` is the high-level, declarative way to stand up an Aster RPC producer. It creates a single iroh node that serves blobs, docs, gossip, Aster RPC, and admission -- all on one endpoint, one node ID. You hand it your service implementations, and it handles the rest.
 
@@ -165,11 +165,11 @@ await srv.close()  # safe to call multiple times
 
 ## The unified node
 
-This is the key architectural insight: `AsterServer` builds ONE iroh node with ONE endpoint ID. That single endpoint serves:
+`AsterServer` builds one Iroh node with one endpoint ID. That endpoint serves:
 
 <MermaidDiagram source={"graph LR\n    E[\"One iroh endpoint\"] --> B[\"BLOBS_ALPN \u2192 iroh-blobs\"]\n    E --> D[\"DOCS_ALPN \u2192 iroh-docs\"]\n    E --> G[\"GOSSIP_ALPN \u2192 iroh-gossip\"]\n    E --> R[\"aster/1 \u2192 RPC Server\"]\n    E --> CA[\"aster.consumer_admission \u2192 admission handler\"]\n    E --> PA[\"aster.producer_admission \u2192 mesh admission\"]\n"} />
 
-Why this matters: peers connect once and can use any protocol. A consumer that has been admitted through the admission handshake can then call RPC methods, fetch blobs, subscribe to gossip topics, and sync docs -- all through the same QUIC connection pool, the same relay, the same node ID.
+The node shares its identity and connection pool across protocols. A consumer that has been admitted through the admission handshake can then call RPC methods, fetch blobs, subscribe to gossip topics, and sync docs -- through the same node identity and connection pool. Each QUIC connection negotiates one ALPN.
 
 
 ## Properties

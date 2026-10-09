@@ -11,7 +11,7 @@ agent check-in and its unary status call. Use the request types, service name,
 method name, and response shape defined there rather than making up a different
 contract. Do not implement later chapters yet.
 
-Use published package versions compatible with the source you select, and
+Use the public-preview 0.3.893 wheel from Forgejo as directed by the guide, and
 record the Aster release, Python version, and example source revision. If they
 do not agree, report the mismatch and stop instead of silently rewriting the
 API or depending on a private repository.

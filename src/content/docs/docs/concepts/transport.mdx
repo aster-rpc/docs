@@ -12,35 +12,33 @@ The transport layer is independent. You can use iroh without Aster for any appli
 
 Every iroh endpoint has an ed25519 keypair. The public key is called the `EndpointId`. It serves as the endpoint's stable identity regardless of network location -- the same endpoint keeps the same `EndpointId` whether it is on a home Wi-Fi network, a corporate LAN, a mobile cellular connection, or a cloud VM.
 
-When you connect to a remote endpoint, you specify its `EndpointId`. The transport layer resolves that identity to a network path. The application never handles IP addresses directly.
-
-This is the foundational inversion: connections go to a cryptographic identity, not a network address.
+When you connect to a remote endpoint, you specify its `EndpointId`. The transport layer resolves that identity to a network path. Applications can supply direct IP addresses and relay hints when discovery alone is insufficient.
 
 ## QUIC over UDP
 
 iroh uses QUIC as its transport protocol. QUIC provides several properties that matter for distributed systems:
 
-**Stream independence.** Each QUIC stream has independent flow control. A lost packet on one stream does not stall any other stream. This eliminates the head-of-line blocking problem that affects HTTP/2 (and therefore gRPC) when multiplexing over TCP.
+**Stream independence.** Each QUIC stream has independent flow control. Loss on one stream does not impose TCP-style delivery ordering on other streams. Streams still share connection flow control, congestion control, and network capacity.
 
-**Connection migration.** QUIC connections are identified by a connection ID, not by the TCP 4-tuple (source IP, source port, destination IP, destination port). When an endpoint moves between networks -- Wi-Fi to cellular, one access point to another -- the connection continues without re-establishment.
+**Connection migration.** QUIC connections are identified by a connection ID, not by the TCP 4-tuple (source IP, source port, destination IP, destination port). When an endpoint moves between networks -- Wi-Fi to cellular, one access point to another -- the connection can continue if a usable new path is available.
 
 **Built-in encryption.** QUIC mandates TLS 1.3. In iroh, the TLS handshake authenticates both endpoints using their ed25519 keys. Every connection is end-to-end encrypted and mutually authenticated by construction.
 
-**Multiplexed streams.** A single QUIC connection supports many concurrent streams. Aster uses one stream per RPC call, so concurrent calls share a connection without interfering with each other.
+**Multiplexed streams.** A single QUIC connection supports many concurrent streams. Ordinary Aster calls use one stream per RPC. Session-scoped services carry a session ID across call streams. Concurrent streams share connection resources.
 
 ## NAT traversal
 
-Most devices on the internet are behind NATs. Establishing direct connections between two NAT'd devices is a solved but non-trivial problem. iroh handles it transparently.
+Iroh attempts to establish a direct path between endpoints, including endpoints behind NATs. Network and firewall policy determine which paths are available.
 
-**Hole-punching.** When two endpoints want to connect, iroh coordinates a simultaneous connection attempt that allows both NATs to create the necessary mappings. This works for most consumer and enterprise NAT configurations.
+**Hole-punching.** When two endpoints want to connect, iroh coordinates a simultaneous connection attempt that allows both NATs to create the necessary mappings. Some NAT and firewall configurations prevent direct connectivity.
 
-**Relay fallback.** When hole-punching fails -- for example, behind symmetric NATs or restrictive corporate firewalls -- iroh falls back to relay servers. Relay servers forward encrypted QUIC packets between endpoints. They cannot read the traffic (it is end-to-end encrypted) and they are not proxies in the application sense. They are infrastructure for connectivity, not for processing.
+**Relay fallback.** When hole-punching fails -- for example, behind symmetric NATs or restrictive corporate firewalls -- iroh falls back to relay servers. Relay servers forward encrypted QUIC packets between endpoints. Relays forward end-to-end encrypted traffic; they do not receive the application plaintext. They can observe connection metadata.
 
-**Path upgrades.** iroh continuously attempts to establish direct connections even when using a relay. If network conditions change and a direct path becomes available, iroh transparently migrates the connection. The application sees no interruption.
+**Path upgrades.** iroh continuously attempts to establish direct connections even when using a relay. If network conditions change and a direct path becomes available, iroh transparently migrates the connection. A path upgrade can preserve the existing connection.
 
 ## Aster addresses: how to find an endpoint
 
-An `EndpointId` identifies who you want to reach. An **aster address** tells the transport how to find them. Aster uses a compact `aster1...` format that encodes everything needed to connect:
+An `EndpointId` identifies who you want to reach. An **aster address** tells the transport how to find them. Aster uses a compact `aster1...` format that encodes the endpoint identity and available network hints:
 
 ```
 aster14TudWqdmQLgjyczpq19BnP8f4FNF68bp8YBvGa51GFEqi5rnPWYAfhbTVA3SvNXfNeoaQJVTC
@@ -63,10 +61,10 @@ client = AsterClient(address="aster14TudW...")
 await client.connect()
 ```
 
-The `aster1` prefix is a human-readable marker. The rest is base58-encoded binary containing the endpoint identity and network hints. The format is compact (typically 80--120 characters), safe to copy-paste, and contains no secrets.
+The `aster1` prefix is a human-readable marker. The rest is base58-encoded binary containing the endpoint identity and network hints. The address contains no secret key; its length depends on the included hints.
 
 :::note[Internal detail]
-Under the hood, the address is decoded into a `NodeAddr` containing the `EndpointId`, optional relay URL, and optional direct socket addresses. The `EndpointId` is always required. The relay URL and direct addresses are hints -- if provided, iroh uses them for initial connectivity. If only the `EndpointId` is available, iroh falls back to discovery mechanisms (DNS, distributed hash table, local network).
+Under the hood, the address is decoded into a `NodeAddr` containing the `EndpointId`, optional relay URL, and optional direct socket addresses. The `EndpointId` is always required. The relay URL and direct addresses are hints -- if provided, iroh uses them for initial connectivity. If only the `EndpointId` is available, connectivity depends on the discovery mechanisms enabled for that endpoint.
 :::
 
 ## ALPN protocol negotiation
@@ -81,15 +79,15 @@ QUIC connections use ALPN (Application-Layer Protocol Negotiation) to agree on w
 - `aster.producer_admission` -- producer enrollment
 - `aster.admission` (optional) -- delegated admission via `@aster`-issued enrollment tokens
 
-A single iroh endpoint can serve all of these simultaneously. One connection to a peer can carry RPC calls, blob transfers, and gossip messages, each on separate QUIC streams identified by their ALPN.
+A single iroh endpoint can serve all of these simultaneously. ALPN selects a protocol for each QUIC connection. RPC, blob transfers, and gossip use protocol-specific connections to the same endpoint.
 
 The admission ALPNs handle the trust handshake before RPC begins. `aster.consumer_admission` verifies credentials signed by the operator's root key. `aster.admission` verifies tokens issued by the `@aster` registry service -- this is the delegated path used when consumers discover services through `@aster` and receive enrollment tokens via access grants.
 
 ## Unified node
 
-Aster runs as a unified node: a single iroh endpoint that serves RPC, blobs, documents, and gossip. There is no separate "blob server" or "gossip server." All capabilities share the same endpoint identity, the same QUIC connections, and the same NAT traversal infrastructure.
+Aster runs as a unified node: a single iroh endpoint that serves RPC, blobs, documents, and gossip. There is no separate "blob server" or "gossip server." All capabilities share the same endpoint identity, protocol-specific QUIC connections, and the same NAT traversal infrastructure.
 
-This means a service that needs to transfer large files can use iroh-blobs alongside its RPC methods. A service that needs real-time notifications can use iroh-gossip. A service that needs replicated state can use iroh-docs. All of these use the same `EndpointId` and the same connections.
+This means a service that needs to transfer large files can use iroh-blobs alongside its RPC methods. A service that needs real-time notifications can use iroh-gossip. A service that needs replicated state can use iroh-docs. All of these use the same `EndpointId` and protocol-specific connections.
 
 ## Transport tuning
 
@@ -115,6 +113,8 @@ The lifecycle of a connection:
 4. A QUIC handshake authenticates both endpoints using their ed25519 keys.
 5. The connection is established. Both sides can open streams.
 6. Each RPC call opens a new bidirectional QUIC stream on the existing connection.
-7. If the network path changes, QUIC connection migration keeps the connection alive.
+7. If the network path changes, QUIC can migrate to a reachable new path.
 
-No DNS lookup. No certificate verification against a CA. No load balancer in the middle. The transport proves identity, establishes connectivity, and gets out of the way.
+Address resolution may use configured discovery services. Endpoint authentication uses the expected public key; deployment authorization is a separate [trust policy](/docs/concepts/trust-model/).
+
+See [configuration](/docs/reference/configuration/) for endpoint and discovery settings.

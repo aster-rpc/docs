@@ -5,191 +5,48 @@ slug: "docs/reference/architecture"
 
 import MermaidDiagram from '@components/MermaidDiagram.astro';
 
+Aster is a multi-language SDK built around a shared Rust engine. The Rust facade and language bindings expose typed services, while Rust implements the transport, RPC dispatch, wire envelopes, and shared security checks.
 
-Aster is a peer-to-peer RPC framework built on top of iroh. This document explains the full stack, from the decorators you write down to the QUIC packets on the wire.
+## SDK layers
 
-## The stack
+<MermaidDiagram source={"graph TD\n    API[\"Rust facade and Python / TypeScript / Go / Java / .NET APIs\"] --> RPC[\"Shared Rust RPC dispatch and transport adapters\"]\n    RPC --> CORE[\"aster_transport_core: endpoints, wire codecs, trust, data protocols\"]\n    CORE --> IROH[\"Iroh: QUIC, blobs, documents, gossip\"]\n    IROH --> NET[\"Direct network paths and encrypted relay traffic\"]\n"} />
 
-<MermaidDiagram source={"graph TD\n    subgraph PY[\"Python / TypeScript layer\"]\n        A[\"AsterServer, AsterClient, @service, @rpc<br/>ForyCodec, interceptors, trust/admission\"]\n    end\n\n    subgraph RS[\"Rust bindings (PyO3 / NAPI-RS)\"]\n        B[\"IrohNode, NetClient, BlobsClient,<br/>DocsClient, GossipClient, HookManager\"]\n    end\n\n    subgraph CORE[\"Core (aster_transport_core)\"]\n        C[\"CoreNode, CoreNetClient, CoreBlobsClient,<br/>CoreDocsClient, CoreGossipClient, AsterQueueHandler\"]\n    end\n\n    subgraph IROH[\"Iroh crates\"]\n        D[\"iroh (endpoint, router), iroh-blobs,<br/>iroh-docs, iroh-gossip\"]\n    end\n\n    subgraph NET[\"Network\"]\n        E[\"UDP, relay servers, NAT traversal\"]\n    end\n\n    PY -- \"PyO3 / NAPI-RS async bridge\" --> RS\n    RS -- \"Rust function calls\" --> CORE\n    CORE -- \"async Rust (tokio)\" --> IROH\n    IROH -- \"QUIC (quinn)\" --> NET\n"} />
+- **Rust facade (`aster`)** provides the Rust RPC API, dispatch, transport adapters, and native-stack access.
+- **Language APIs** adapt service definitions, handler calls, and payload types to Python, TypeScript, Go, Java, and .NET.
+- **Native bridges** use PyO3, NAPI-RS, or the C ABI to connect language runtimes to the Rust engine.
+- **Transport core** manages endpoints, protocol routing, framing, canonical contracts, and Iroh data operations.
+- **Iroh** provides authenticated QUIC connectivity, relay support, blobs, document replication, and gossip.
 
-Each layer has a clear responsibility:
+For example, the Python server uses Rust dynamic dispatch for header decoding, method lookup, serialization checks, session rules, capabilities, and deadlines. Python runs the application handlers and its interceptor chain.
 
-- **Language layer** -- Application-facing API. Service definitions, RPC call/dispatch, serialization (Fory), interceptors, trust/admission logic. All pure Python/TypeScript except for the native bindings import.
-- **Rust bindings** -- Thin PyO3/NAPI-RS wrappers that expose Rust async functions as language-native awaitables. No business logic lives here. Each wrapper calls into core and bridges the async boundary.
-- **Core** -- The authoritative backend. `CoreNode` manages the iroh `Router`, which dispatches connections by ALPN. All real logic (node creation, blob operations, doc sync, gossip, connection management) lives here.
-- **Iroh crates** -- The underlying P2P networking stack. Provides QUIC endpoints with relay fallback, content-addressed blob storage, CRDT document sync, and gossip pub-sub.
-
-
-## The unified node
-
-The central design decision in Aster is that everything runs through a single iroh endpoint. When `AsterServer.start()` creates the node, it registers all protocol handlers on one `Router`:
+## One endpoint, multiple protocols
 
 <MermaidDiagram source={"graph TD\n    NODE[\"IrohNode\"]\n    ROUTER[\"Router\"]\n\n    NODE --> ROUTER\n\n    ROUTER --> BLOBS[\"iroh-blobs<br/><code>BLOBS_ALPN</code>\"]\n    ROUTER --> DOCS[\"iroh-docs<br/><code>DOCS_ALPN</code>\"]\n    ROUTER --> GOSSIP[\"iroh-gossip<br/><code>GOSSIP_ALPN</code>\"]\n    ROUTER --> RPC[\"Aster RPC<br/><code>aster/1</code>\"]\n    ROUTER --> CA[\"Consumer Admission<br/><code>aster.consumer_admission</code>\"]\n    ROUTER --> PA[\"Producer Admission<br/><code>aster.producer_admission</code>\"]\n\n    RPC --> QH1[\"AsterQueueHandler\"]\n    CA --> QH2[\"AsterQueueHandler\"]\n    PA --> QH3[\"AsterQueueHandler\"]\n"} />
 
-### How the Router works
+The Iroh router selects a protocol handler using the connection's ALPN. RPC, admission, blobs, documents, and gossip can share an endpoint identity and network configuration. Different ALPNs use separate QUIC connections; an RPC connection does not carry blob or gossip streams.
 
-Iroh's `Router` is the central connection dispatcher. When a peer opens a QUIC connection, the ALPN (Application-Layer Protocol Negotiation) string in the TLS handshake determines which `ProtocolHandler` receives the connection.
+The core's `AsterQueueHandler` routes custom-protocol connections into a bounded channel. The shared Rust RPC runtime accepts and dispatches RPC traffic. Applications can also register custom protocols through the native APIs.
 
-Built-in iroh protocols register their own handlers:
-- `iroh-blobs` registers for `BLOBS_ALPN` (blob transfer protocol)
-- `iroh-docs` registers for `DOCS_ALPN` (document sync protocol)
-- `iroh-gossip` registers for `GOSSIP_ALPN` (gossip broadcast protocol)
+## Async execution
 
-### AsterQueueHandler
+Rust executes asynchronous network operations on Tokio. Python's PyO3 bridge exposes awaitables, and the TypeScript NAPI-RS bridge exposes promises. The C ABI exposes handles and completion events for other bindings. Application handlers follow their binding's concurrency model.
 
-Custom Aster ALPNs (`aster/1`, `aster.consumer_admission`, `aster.producer_admission`) are each registered as an `AsterQueueHandler` instance. This is a thin `ProtocolHandler` implementation that does one thing: when a connection arrives, it places `(alpn, connection)` on a bounded tokio mpsc channel and returns.
+## Contracts and payloads
 
-All `AsterQueueHandler` instances share a single sender, so from the consumer's perspective there is one unified stream of incoming connections. The language layer calls `node.accept_aster()` to pull from this channel:
+The framework derives a canonical descriptor from a service definition and hashes it with BLAKE3. The resulting `contract_id` identifies that descriptor across bindings. Method names, wire types, and canonical settings must agree; the ID does not verify application behavior.
 
-```rust
-// Rust core (simplified)
-struct AsterQueueHandler {
-    alpn: Vec<u8>,
-    tx: mpsc::Sender<(Vec<u8>, Connection)>,
-}
+See [contract identity](/docs/concepts/contract-identity/) for canonical encoding and [serialization](/docs/concepts/serialization/) for payload settings.
 
-impl ProtocolHandler for AsterQueueHandler {
-    async fn accept(&self, conn: Connection) -> Result<()> {
-        self.tx.send((self.alpn.clone(), conn)).await?;
-        Ok(())
-    }
-}
-```
-
-The Python accept loop in `AsterServer._accept_loop()` then dispatches based on the ALPN:
-
-```python
-# Python (simplified)
-while True:
-    alpn, conn = await self._node.accept_aster()
-    if alpn == b"aster/1":
-        asyncio.create_task(self._server.handle_connection(conn))
-    elif alpn == b"aster.consumer_admission":
-        asyncio.create_task(handle_consumer_admission(conn, ...))
-    elif alpn == b"aster.producer_admission":
-        asyncio.create_task(handle_producer_admission(conn, ...))
-```
-
-### Why one endpoint matters
-
-A single endpoint means:
-- **One node ID** -- peers only need one address to reach you. The same `NodeAddr` works for RPC calls, blob downloads, doc sync, and gossip.
-- **One relay connection** -- iroh maintains a persistent connection to a relay server for NAT traversal. One endpoint = one relay connection, not N.
-- **Connect once, use any protocol** -- a peer that has been admitted via consumer admission can subsequently call RPC methods, fetch blobs, sync docs, and join gossip topics. No additional connections needed.
-- **Gate 0 applies to everything** -- the connection-level admission hook gates ALL protocols. You cannot bypass RPC admission by connecting on the blobs ALPN.
-
-
-## The async bridge
-
-### Language bindings to Rust
-
-The PyO3 module init starts a single shared tokio runtime. Every async Rust function exposed to Python uses `pyo3-async-runtimes::tokio::future_into_py` to convert a Rust `Future` into a Python awaitable. TypeScript uses NAPI-RS with a similar pattern.
-
-<MermaidDiagram source={"sequenceDiagram\n    participant Py as Python asyncio\n    participant PyO3 as PyO3 wrapper\n    participant Tokio as Tokio runtime\n    participant Iroh as Iroh (Rust)\n\n    Py->>PyO3: await node.accept_aster()\n    PyO3->>Tokio: future_into_py(async { ... })\n    Tokio->>Iroh: poll Rust future\n    Iroh-->>Tokio: connection arrives\n    Tokio-->>PyO3: result ready\n    PyO3-->>Py: return to event loop\n"} />
-
-This means:
-- Python's `asyncio` event loop (or Node.js's event loop) drives the application.
-- Rust's tokio runtime executes the actual I/O.
-- The bridge converts between them without blocking either.
-- Python tests use `asyncio_mode = "auto"` (pytest-asyncio) so every `async def test_*` just works.
-
-### The FFI story for other languages
-
-The core crate is designed to support multiple language bindings:
-
-<MermaidDiagram source={"graph TD\n    CORE[\"core/src/lib.rs<br/>(tokio-async API)\"]\n\n    CORE --> PYO3[\"PyO3 bridge<br/>future_into_py\"]\n    CORE --> NAPI[\"NAPI-RS bridge<br/>napi async\"]\n    CORE --> CFFI[\"C FFI (ffi/)<br/>runtime.spawn +<br/>completion event queue\"]\n    CORE --> JNI[\"Java JNI (future)<br/>runtime.spawn +<br/>completion event queue\"]\n"} />
-
-- **Python** -- `future_into_py` bridges directly because Python has native async/await.
-- **TypeScript** -- NAPI-RS async tasks bridge to Node.js promises.
-- **C FFI** -- `runtime.spawn()` kicks off the async operation, then signals completion via an event queue. The C caller polls for results.
-- **Java/Go** (future) -- Same `runtime.spawn()` + completion pattern.
-
-The key insight: no new concurrency primitives cross the FFI boundary. The core crate speaks pure tokio async. Each binding layer adapts that to its language's concurrency model.
-
-
-## Identity and profile architecture
-
-Aster separates three concerns in its trust and identity model:
-
-<MermaidDiagram source={"graph LR\n    subgraph OP[\"Operator (workstation)\"]\n        A[\"~/.aster/config.toml<br/>profile + root_pubkey\"]\n        B[\"OS keyring<br/>root_privkey (never on nodes)\"]\n    end\n\n    subgraph NODE[\"Node (deployed)\"]\n        C[\".aster-identity<br/>secret_key + endpoint_id<br/>signed peer entries\"]\n    end\n\n    subgraph MESH[\"Mesh (shared trust)\"]\n        D[\"root_pubkey<br/>(32-byte ed25519 public key)<br/>verifies all credentials\"]\n    end\n\n    OP -- \"aster enroll node\" --> NODE\n    NODE -- \"loads root_pubkey<br/>from peer entry\" --> MESH\n    OP -- \"signs credentials<br/>with root_privkey\" --> MESH\n"} />
-
-### Operator layer
-
-The operator manages deployment meshes from a workstation. The CLI profile system (`aster profile create/list/use/show/delete`) stores mesh metadata in `~/.aster/config.toml`. The root private key -- the most sensitive secret -- is stored in the OS keyring via the `keyring` package, scoped by profile name (`root_privkey:{name}`). It never touches a running Aster node.
-
-### Node layer
-
-Each deployed node has an `.aster-identity` file containing its secret key (for stable EndpointId) and one or more signed peer entries (enrollment credentials). The file is generated by `aster enroll node` on the operator's machine and deployed alongside the application. A single identity file can hold credentials for multiple meshes and roles.
-
-### Mesh layer
-
-A mesh is defined by its root public key. All nodes in the same mesh share the same root public key and use it to verify enrollment credentials. When `AsterServer` or `AsterClient` loads a peer entry from `.aster-identity`, the `root_pubkey` field in that entry tells the node which mesh it belongs to.
-
-### Configuration flow
-
-<MermaidDiagram source={"sequenceDiagram\n    participant Op as Operator (workstation)\n    participant KR as OS Keyring\n    participant File as .aster-identity\n    participant Srv as AsterServer (node)\n\n    Op->>Op: aster profile create prod\n    Op->>KR: aster keygen root --profile prod\n    KR-->>Op: root_privkey stored\n\n    Op->>KR: aster enroll node --role producer\n    KR-->>Op: read root_privkey\n    Op->>Op: generate node keypair + sign credential\n    Op->>File: write .aster-identity\n\n    Srv->>File: AsterServer(peer=\"billing-producer\")\n    File-->>Srv: secret_key + peer entry\n    Srv->>Srv: configure admission gates\n    Note over Srv: root_privkey is NOT present on the node\n"} />
-
-In dev mode (no `.aster-identity`), the entire identity/profile system is bypassed. Ephemeral keys are generated in memory, consumer gates are opened, and everything works without any files.
-
-
-## Contract identity
-
-Every `@service`-decorated class gets a deterministic `contract_id` -- a BLAKE3 hash of the service's canonical form. This is how Aster knows two services are the same, even across languages.
-
-### How it works
-
-1. The `@service` decorator scans the class and extracts a `ServiceInfo`: method names, parameter types, return types, patterns (unary/streaming), version.
-
-2. `contract_id_from_service(cls)` builds a `ServiceContract` -- a normalized data structure containing:
-   - Service name (NFC-normalized Unicode)
-   - Version number
-   - Scope (shared or stream)
-   - Each method: name, pattern, request type graph, response type graph
-   - Type definitions: field names, field types, containers (list/set/map), nested references
-
-3. The `ServiceContract` is serialized to bytes using a canonical binary format:
-   - Deterministic field ordering (alphabetical by spec)
-   - varint length-prefixed strings
-   - zigzag-encoded integers
-   - No padding, no alignment
-
-4. The bytes are hashed with BLAKE3, producing a 32-byte digest (displayed as 64-char hex).
-
-### Why this matters
-
-The contract_id is the same for any implementation that defines the same methods with the same types at the same version. A Python service and a TypeScript service with identical method signatures produce identical contract IDs. This enables:
-
-- **Safe client/server version checking** -- the consumer's contract_id must match the producer's.
-- **Registry deduplication** -- two producers serving the same contract are interchangeable.
-- **Cross-language interop** -- a Python client can call a TypeScript server (or vice versa) as long as contract IDs match.
-
-### Type graph resolution
-
-Types can be recursive (e.g., a tree node that contains child tree nodes). The contract identity system handles this using Tarjan's algorithm for strongly connected components (SCC):
-
-<MermaidDiagram source={"graph TD\n    A[\"Build directed graph<br/>of type references\"] --> B[\"Find SCCs<br/>(Tarjan's algorithm)\"]\n    B --> C[\"Break cycles with<br/>SELF_REF markers\"]\n    C --> D[\"Hash types in reverse<br/>topological order<br/>(leaves first)\"]\n    D --> E[\"Reference types by<br/>their BLAKE3 hash\"]\n"} />
-
-This ensures that even recursive types produce a stable, deterministic contract_id.
-
-
-## RPC wire protocol
-
-When a client calls an RPC method, here is what happens on the wire:
+## RPC framing
 
 <MermaidDiagram source={"sequenceDiagram\n    participant C as Client\n    participant S as Server\n\n    C->>S: Open QUIC bidirectional stream\n    C->>S: Frame: StreamHeader (HEADER flag)<br/>service, method, version, metadata\n    C->>S: Frame: Request payload (Fory-serialized)\n    S->>C: Frame: Response payload (Fory-serialized)\n    S->>C: Frame: RpcStatus trailer (TRAILER flag)<br/>code: OK\n"} />
 
-Each frame is length-prefixed with flags:
-- `HEADER` (0x04) -- first frame contains the `StreamHeader`
-- `TRAILER` (0x02) -- last frame contains `RpcStatus` (success or error)
-- `COMPRESSED` (0x01) -- payload is zstd-compressed (auto for payloads > 4KB)
+Headers and status trailers use AEv1, a binary encoding independent of Fory. Request and response payloads use Fory XLANG for cross-language calls. Frames carry a length and flags, including `HEADER` (`0x04`), `TRAILER` (`0x02`), and `COMPRESSED` (`0x01`). Payloads strictly larger than 4096 bytes are compressed by default.
 
-Serialization uses Apache Fory in XLANG (cross-language) mode by default. The `ForyCodec` handles encoding/decoding and transparent compression.
+Session-scoped services use connection-scoped session IDs across call streams. They do not require one persistent stream per service instance. See [session-scoped services](/docs/concepts/session-scoped-services/).
 
+## Deployment identity
 
-## Putting it all together
+A node's secret key determines its endpoint identity. Enrollment credentials and method capability requirements provide deployment authorization under the configured root key. Operator profiles and identity files are configuration mechanisms; they must be protected according to the keys and credentials they contain.
 
-Here is the complete flow of an RPC call from `AsterClient` to `AsterServer`:
-
-<MermaidDiagram source={"sequenceDiagram\n    participant AC as AsterClient\n    participant EP as QUIC Endpoint\n    participant AS as AsterServer\n    participant Svc as HelloService\n\n    Note over AC: 1. Connect\n    AC->>EP: Create QUIC endpoint\n    AC->>AS: Connect on aster.consumer_admission ALPN\n    AC->>AS: Send signed credential\n    AS-->>AC: Service list + admission\n    AS->>AS: Add client to Gate 0 allowlist\n\n    Note over AC: 2. Get client stub\n    AC->>AC: client = await c.client(HelloService)\n    AC->>EP: Open connection on aster/1 ALPN\n\n    Note over AC: 3. RPC call\n    AC->>AS: Open bidirectional stream\n    AC->>AS: StreamHeader + Fory-serialized request\n    AS->>Svc: Dispatch to say_hello()\n    Svc-->>AS: HelloResponse\n    AS-->>AC: Fory-serialized response + OK trailer\n\n    Note over AC: 4. Close\n    AC->>EP: Close connections + endpoint\n"} />
-
-All of this happens over iroh's QUIC transport with automatic relay fallback, NAT traversal, and connection migration. The application code sees none of this complexity -- just `await hello.say_hello(request)`.
+Development settings are permissive. Read the [trust model](/docs/concepts/trust-model/) and [configuration reference](/docs/reference/configuration/) before deploying access-controlled services.

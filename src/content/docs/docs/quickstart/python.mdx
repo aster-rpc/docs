@@ -1,7 +1,7 @@
 ---
 title: Quickstart
 slug: "docs/quickstart/python"
-description: Write a service on one machine, call it from another -- even if they're on different networks. In under two minutes.
+description: Define a greeting service and call it from a second process.
 ---
 
 import AgentBrief from '@components/AgentBrief.astro';
@@ -12,7 +12,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 
 <AgentBrief prompt={agentPrompt} download="/prompts/first-service.txt" />
-Write a service on one machine, call it from another -- even if they're on different networks, behind firewalls, with no shared infrastructure between them. In under two minutes.
+This guide defines a greeting service and calls it from a second process. Peers can also run on separate networks when a direct or relay path is available.
 
 ## Prerequisites
 
@@ -25,8 +25,8 @@ Write a service on one machine, call it from another -- even if they're on diffe
 </TabItem>
 <TabItem label="TypeScript">
 
-- **Node.js 20+** or **Bun 1.0+**
-- TypeScript 5.0+ (decorators require `experimentalDecorators`)
+- **Node.js 20+** and TypeScript 5.0+
+- Use standard TypeScript decorators; leave `experimentalDecorators` unset.
 
 </TabItem>
 </Tabs>
@@ -36,26 +36,37 @@ Write a service on one machine, call it from another -- even if they're on diffe
 <Tabs syncKey="language">
 <TabItem label="Python">
 
-```bash
-pip install aster-rpc
-```
+Aster **0.3.893 is a public preview**. This version is distributed through [Forgejo packages](https://forge.emrul.dev/Aster/-/packages), rather than PyPI. Choose the wheel for your platform from the [Python artifact list](https://forge.emrul.dev/api/v1/packages/Aster/generic/aster-python/0.3.893/files): Apple Silicon macOS, Linux x86-64 or ARM64 (glibc 2.34+), or Windows x86-64.
 
-Or with uv:
+For example, on Apple Silicon macOS:
 
 ```bash
-uv pip install aster-rpc
+python -m pip install https://forge.emrul.dev/api/packages/Aster/generic/aster-python/0.3.893/aster_rpc-0.3.893-cp39-abi3-macosx_11_0_arm64.whl
 ```
+
+Use the corresponding wheel URL on other platforms. Python 3.9–3.13 is required. The optional CLI is independently versioned; see the [CLI reference](/docs/reference/cli) for installation and its validation limits.
+
 
 </TabItem>
 <TabItem label="TypeScript">
 
-```bash
-# bun (recommended)
-bun add @aster-rpc/aster
+Aster **0.3.893 is a public preview**. This version is available from [Forgejo packages](https://forge.emrul.dev/Aster/-/packages); it was not published to npmjs.org.
 
-# or npm
-npm install @aster-rpc/aster
+Add this scope mapping to your project's `.npmrc`:
+
+```ini
+@aster-rpc:registry=https://forge.emrul.dev/api/packages/Aster/npm/
 ```
+
+Then install the pinned preview and TypeScript compiler:
+
+```bash
+npm install @aster-rpc/aster@0.3.893
+npm install --save-dev typescript@^5 @types/node
+```
+
+Configure `package.json` and `tsconfig.json` as shown in [TypeScript build setup](/docs/guides/typescript-build-setup#configure-the-compiler) before continuing.
+
 
 </TabItem>
 </Tabs>
@@ -71,14 +82,16 @@ Create `hello_service.py`:
 
 ```python
 from dataclasses import dataclass
-from aster import service, rpc
+from aster import service, rpc, wire_type
 
 
+@wire_type("hello/HelloRequest")
 @dataclass
 class HelloRequest:
     name: str = ""
 
 
+@wire_type("hello/HelloResponse")
 @dataclass
 class HelloResponse:
     message: str = ""
@@ -91,7 +104,7 @@ class HelloService:
         return HelloResponse(message=f"Hello, {req.name}!")
 ```
 
-Three decorators: `@dataclass` (standard Python), `@service` (marks the class as an Aster service), `@rpc` (marks a method as a callable endpoint). No schema files, no code generation, no base classes. Wire tags are auto-derived from the class names; for production cross-language services you'll add explicit `@wire_type("ns/Type")` decorators -- see [Defining Services and Types](/docs/guides/services).
+`@dataclass` defines the data fields, `@wire_type` gives each type an explicit wire tag, `@service` identifies the service, and `@rpc` exposes the method. See [Defining services and types](/docs/guides/services) for the contract rules.
 
 </TabItem>
 <TabItem label="TypeScript">
@@ -99,14 +112,16 @@ Three decorators: `@dataclass` (standard Python), `@service` (marks the class as
 Create `service.ts`:
 
 ```typescript
-import { Service, Rpc } from '@aster-rpc/aster';
+import { Service, Rpc, WireType } from '@aster-rpc/aster';
 
-class HelloRequest {
+@WireType("hello/HelloRequest")
+export class HelloRequest {
   name = "";
   constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
 }
 
-class HelloResponse {
+@WireType("hello/HelloResponse")
+export class HelloResponse {
   message = "";
   constructor(init?: Partial<HelloResponse>) { if (init) Object.assign(this, init); }
 }
@@ -122,7 +137,7 @@ export class HelloService {
 }
 ```
 
-Two decorators: `@Service` (marks the class as an Aster service), `@Rpc` (marks a method as a callable endpoint). No schema files, no base classes. Wire tags are auto-derived from the class names; for production cross-language services you'll add explicit `@WireType("ns/Type")` decorators -- see [Defining Services and Types](/docs/guides/services).
+`@Service` identifies the service, `@Rpc` exposes its method, and `@WireType` gives each exported data type an explicit wire tag. See [Defining services and types](/docs/guides/services) for the contract rules.
 
 Before running, generate type metadata with `npx aster-gen` — this reads your TypeScript source and emits `aster-rpc.generated.ts`, which `AsterServer` auto-imports on startup. See [TypeScript Build Setup](/docs/guides/typescript-build-setup) for details and bundler plugin options.
 
@@ -179,7 +194,8 @@ await server.serve();
 ```
 
 ```bash
-node producer.ts
+npx tsc
+node producer.js
 ```
 
 </TabItem>
@@ -196,7 +212,7 @@ In dev mode (no `ASTER_*` environment variables set), the server:
 
 A **consumer** is the node that calls into a producer's services. Consumers don't need access to the service's source code -- they discover methods from the producer's published contract at runtime, then call them by name.
 
-The producer and consumer don't have to live on the same machine, or even the same network. Your producer might be in a cloud environment behind a corporate firewall; your consumer might be on your laptop on coffee shop Wi-Fi, or on a Raspberry Pi behind your home router, or on a phone tethered to a 5G connection. No VPN to set up, no firewall rule to add, no port to forward, no DNS entry to register. The address the consumer uses is the producer's public key -- Aster figures out the network path between them, direct if it can and relayed if it has to.
+The producer and consumer can run on separate networks. Aster attempts a direct connection and uses a relay when needed. Connectivity still requires a reachable direct or relay path. The `aster1...` address contains the endpoint identity and connection hints.
 
 <Tabs syncKey="language">
 <TabItem label="Python">
@@ -210,9 +226,9 @@ from aster import AsterClient
 
 async def main():
     async with AsterClient() as c:
-        # The dynamic proxy speaks JSON and needs no local type definitions --
+        # The dynamic proxy builds XLANG requests from the published contract --
         # methods are discovered from the producer's published contract.
-        hello = c.proxy("HelloService")
+        hello = await c.proxy("HelloService")
         resp = await hello.say_hello({"name": "World"})
         print(resp["message"])  # Hello, World!
 
@@ -224,7 +240,7 @@ Run it, passing the producer's address:
 
 ```bash
 # macOS / Linux
-ASTER_ENDPOINT_ADDR=<paste from producer output> python consumer.py
+ASTER_ENDPOINT_ADDR="<paste from producer output>" python consumer.py
 ```
 
 ```powershell
@@ -232,7 +248,7 @@ ASTER_ENDPOINT_ADDR=<paste from producer output> python consumer.py
 $env:ASTER_ENDPOINT_ADDR="<paste from producer output>"; python consumer.py
 ```
 
-`AsterClient` reads `ASTER_ENDPOINT_ADDR` from the environment and connects to the producer. `c.proxy("HelloService")` returns a dynamic stub -- call methods on it like regular async functions. If you'd rather have typed classes (for IDE autocomplete and static checking), share the service definition module between producer and consumer and use `c.client(HelloService)` instead -- see [Defining Services and Types](/docs/guides/services).
+`AsterClient` reads `ASTER_ENDPOINT_ADDR` from the environment and connects to the producer. `await c.proxy("HelloService")` returns a dynamic stub -- call methods on it like regular async functions. If you'd rather have typed classes (for IDE autocomplete and static checking), share the service definition module between producer and consumer and use `await c.client(HelloService)` instead -- see [Defining Services and Types](/docs/guides/services).
 
 </TabItem>
 <TabItem label="TypeScript">
@@ -247,9 +263,9 @@ const client = new AsterClientWrapper({
 });
 await client.connect();
 
-// The dynamic proxy speaks JSON and needs no local type definitions --
+// The dynamic proxy builds XLANG requests from the published contract --
 // methods are discovered from the producer's published contract.
-const hello = client.proxy("HelloService");
+const hello = await client.proxy("HelloService");
 const resp = await hello.sayHello({ name: "World" });
 console.log(resp.message); // Hello, World!
 
@@ -260,29 +276,25 @@ Run it, passing the producer's address:
 
 ```bash
 # macOS / Linux
-ASTER_ENDPOINT_ADDR=<paste from producer output> node consumer.ts
+npx tsc
+ASTER_ENDPOINT_ADDR="<paste from producer output>" node consumer.js
 ```
 
 ```powershell
 # Windows (PowerShell)
-$env:ASTER_ENDPOINT_ADDR="<paste from producer output>"; node consumer.ts
+npx tsc
+$env:ASTER_ENDPOINT_ADDR="<paste from producer output>"; node consumer.js
 ```
 
 </TabItem>
 </Tabs>
 
-## What just happened
+## Connection behavior
 
-Three steps, three things to notice:
+The producer publishes its contract and prints an `aster1...` address. The consumer uses that address to connect, discover the contract, and invoke the greeting method. Transport authentication verifies the endpoint key; open development mode admits consumers without enrollment credentials.
 
-1. **The producer is a server process holding `HelloService`.** When it starts, it prints an `aster1...` address. That address is the node's public key, not a hostname or an IP -- it's stable, globally unique, and can't be impersonated.
+Development mode uses an ephemeral identity, so the address changes after a restart. To try separate machines, copy the current address into the consumer’s `ASTER_ENDPOINT_ADDR`. Each machine needs a reachable direct or relay path.
 
-2. **The consumer connects by that public key.** No DNS lookup, no port forwarding, no certificate to trust. The consumer doesn't even need a copy of the service source code -- it asks the producer what methods exist and builds a stub at runtime.
+## Next steps
 
-3. **The producer and consumer don't have to be on the same machine, or even the same network.** In this quickstart they're both on your laptop because that's the simplest demo. But the address is a public key, so you can run the producer on your homelab, your VPS, or a Raspberry Pi behind your home router, and call it from your laptop on coffee shop Wi-Fi without changing a single line of code. Aster handles NAT traversal and chooses the best network path -- direct if it can, relayed if it has to.
-
-To try this for real, run `producer.py` on one machine and `consumer.py` on another. Copy the `aster1...` address from the producer's output, paste it into the consumer's `ASTER_ENDPOINT_ADDR`, and the call will arrive over whatever network path actually exists between the two machines. No tunnels, no proxies, no shared secrets.
-
-## What's next
-
-Build a real service end-to-end with the **[Mission Control walkthrough](/docs/quickstart/mission-control)** -- 30 minutes, six chapters, four streaming patterns, capability-scoped auth, cross-language interop, and a working MCP agent demo at the end.
+The [Mission Control walkthrough](/docs/quickstart/mission-control) adds streaming, sessions, capability requirements, and an MCP bridge. See the [trust model](/docs/concepts/trust-model) before exposing a service beyond development.

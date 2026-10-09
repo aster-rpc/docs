@@ -1,12 +1,12 @@
 ---
-title: Define a Service
+title: Define a service
 slug: "docs/guides/define-a-service"
 ---
 
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-This guide covers how to define an Aster RPC service: its request/response types, methods, streaming patterns, and configuration options. The concepts are shared across all Aster language bindings. Code examples are Python-first, with other languages to follow.
+This guide covers how to define an Aster RPC service: its request/response types, methods, streaming patterns, and configuration options. The concepts are shared across all Aster language bindings. The examples use Python and TypeScript.
 
 ## Wire types
 
@@ -302,28 +302,9 @@ async def get_task(self, req: TaskRequest) -> TaskResult:
 
 ## Serialization modes
 
-Aster supports three serialization modes, configurable at the service or method level:
+Use `SerializationMode.XLANG`, the default, for cross-language calls. Python also exposes `NATIVE` and `ROW`; those modes are Python-only. See [serialization](/docs/concepts/serialization) for their limits.
 
-| Mode | Description | Use case |
-|------|-------------|----------|
-| `XLANG` | Cross-language Apache Fory serialization with `@wire_type` tags. | Default. Required for cross-language interop (Python &harr; TypeScript &harr; Java &harr; Go). |
-| `NATIVE` | Language-native Fory serialization. No `@wire_type` required. | Deployments where interoperability is second to performance. |
-| `JSON` | Human-readable JSON on the wire. | Debuggability (`tcpdump` / `wireshark` show readable payloads), shell exploration via the dynamic proxy client, and any service that wants to be consumable without a typed client. |
-
-```python
-from aster import service, rpc, SerializationMode
-
-# Accept both the high-performance native mode AND the debuggable JSON mode
-# on the same service. Clients pick one at call time.
-@service(serialization=[SerializationMode.NATIVE, SerializationMode.JSON])
-class TaskService:
-
-    @rpc
-    async def get_task(self, req: TaskRequest) -> TaskResult:
-        ...
-```
-
-> **Note:** the dynamic proxy client (`client.proxy("ServiceName")`) always speaks JSON. If you want the proxy to work against a service, include `SerializationMode.JSON` in its supported modes, or use a typed client for NATIVE/XLANG-only services.
+Dynamic proxies accept plain objects and construct XLANG payloads from the producer’s published manifest. They require usable type metadata. JSON wire mode has been retired.
 
 ## Session-scoped services
 

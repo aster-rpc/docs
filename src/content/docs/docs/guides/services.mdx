@@ -1,11 +1,11 @@
 ---
-title: Defining Services and Types
+title: Defining services and types
 description: Service decorators, streaming patterns, request/response types, wire identity, contract identity, and serialization modes.
 slug: "docs/guides/services"
 ---
 
 
-# Defining Services and Types
+# Defining services and types
 
 This guide covers everything you need to define Aster RPC services: the `@service` and `@rpc` decorators, streaming patterns, request/response types, wire identity, contract identity, and serialization modes.
 
@@ -268,15 +268,14 @@ If you change a method signature, add a method, or change the serialization mode
 
 ## Serialization modes
 
-Aster supports three serialization modes:
+Aster exposes XLANG plus Python-only NATIVE and ROW modes:
 
 | Mode | Enum value | Description |
 |------|-----------|-------------|
 | **XLANG** | `SerializationMode.XLANG` | Cross-language mode via Apache Fory. Types are registered with string tags (via `@wire_type` or auto-derivation). Works across Python, TypeScript, Java, Go, Rust, etc. This is the default. |
-| **NATIVE** | `SerializationMode.NATIVE` | Language-native Fory serialization. Faster than XLANG but only works between peers in the same language. For deployments where interoperability is second to performance. No `@wire_type` tags needed. |
-| **JSON** | `SerializationMode.JSON` | JSON-over-the-wire mode. Slower and less compact than Fory, but human-readable on the wire and the only mode supported by the dynamic proxy client (`client.proxy("ServiceName")`). Useful for cross-language testing, shell exploration, and services that want to be consumable without a typed client. |
+| **NATIVE** | `SerializationMode.NATIVE` | Language-native Fory serialization. Python-only; validate its behavior for your types before using it. No `@wire_type` tags needed. |
 
-Most users never need to change the serialization mode. The default (XLANG) works for both Python-to-Python and cross-language communication. Use NATIVE for a performance boost when you are certain both sides are Python. Use JSON when you want proxy-client compatibility or on-the-wire readability.
+The default, XLANG, supports Python-to-Python and cross-language calls. Dynamic proxies synthesize XLANG types from the published manifest. JSON wire mode has been retired. ROW also exists for Python; see the [ROW example](/docs/examples/data-heavy-row-mode) for its limits.
 
 To change the mode:
 

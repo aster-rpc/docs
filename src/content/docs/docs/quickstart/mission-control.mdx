@@ -1,7 +1,7 @@
 ---
-title: "Build a Control Plane"
+title: "Build a control plane"
 slug: "docs/quickstart/mission-control"
-description: "Build a real-world control plane with four RPC patterns, session-scoped agents, capability-based auth, and cross-language interop — in under an hour."
+description: "Build a real-world control plane with four RPC patterns, session-scoped agents, capability-based auth, and cross-language interop."
 ---
 
 import AgentBrief from '@components/AgentBrief.astro';
@@ -14,15 +14,10 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 
 <AgentBrief prompt={agentPrompt} download="/prompts/mission-control.txt" />
-> You need two services to talk. So you set up a load balancer, provision
-> TLS certs, write protobuf schemas, compile them, configure a service mesh,
-> deploy to Kubernetes, and pray the health checks converge before the
-> demo tomorrow.
->
-> Or: you write one file and run it.
+This walkthrough builds a control plane for remote agents using unary calls, streaming, sessions, and capability requirements. The examples use Python and TypeScript.
 
-:::tip[Don't want to follow along? Skip to the code.]
-The complete, working source for every chapter in this guide lives in the main repo. Clone, run, read.
+:::tip[Example source]
+The repository contains companion examples for this walkthrough.
 
 - **Python:** [examples/python/mission_control](https://github.com/aster-rpc/aster-rpc/tree/main/examples/python/mission_control)
 - **TypeScript:** [examples/typescript/missionControl](https://github.com/aster-rpc/aster-rpc/tree/main/examples/typescript/missionControl)
@@ -59,37 +54,26 @@ class MissionControl {
 
 ```bash
 npx aster-gen                  # generate type metadata (one-time build step)
-node control.ts                # that's the server
+npx tsc
+node control.js                # that's the server
 aster shell aster1Qm...       # that's the client — tab completion, typed responses
 ```
 
 </TabItem>
 </Tabs>
 
-No YAML. No protobuf compilation. No port numbers. No cloud account.
-Encrypted, authenticated, works across NATs, and your colleague on the
-other language can call it too.
-
-**What you're replacing:** Traditional RPC means writing `.proto` files,
-compiling them, setting up TLS certificates, configuring a reverse proxy
-or service mesh so clients can find your service, managing certificate
-rotation, and repeating all of that for every new service. With Aster you
-get mTLS-grade mutual authentication (no CA infrastructure), gRPC-style
-streaming RPCs (no `.proto` compilation), and peer-to-peer connectivity
-(no port forwarding or load balancers).
+Aster creates encrypted QUIC connections authenticated by endpoint keys. Direct connectivity depends on the network; relays carry traffic when a direct path is unavailable.
 
 This guide builds **Mission Control** — a control plane for managing
 remote agents. An agent could be a CI runner, an IoT sensor, an AI
 worker, or a service on your colleague's laptop across the world.
 
-In under an hour you'll have:
+The walkthrough covers:
 - Agents that check in, push metrics, and stream logs
 - Operators that watch, issue commands, and control access
 - A cross-language agent talking to your control plane
 
-Everything runs peer-to-peer. No infrastructure beyond a relay for
-NAT traversal (self-hostable). Once peers find each other, traffic
-flows direct.
+Peers attempt a direct connection and can use a relay when needed. A direct path is not available on every network.
 
 <DocsDiagram kind="mission" />
 
@@ -107,9 +91,8 @@ flows direct.
 Two packages -- the framework and the CLI:
 
 ```bash
-uv pip install aster-rpc aster-cli
-# or:
-pip install aster-rpc aster-cli
+# Install the preview framework wheel first; see the quickstart.
+pip install aster-cli
 ```
 
 The framework gives you `from aster import ...` for your service code. The CLI gives you `aster shell`, `aster trust keygen`, `aster enroll node`, and `aster contract gen-client` -- the operator tools you'll use throughout this guide.
@@ -123,8 +106,8 @@ Two pieces -- the TypeScript runtime and the CLI tools:
 
 ```bash
 # In your TypeScript project:
-bun add @aster-rpc/aster
-# or: npm install @aster-rpc/aster
+npm install @aster-rpc/aster@0.3.893
+# Configure the Forgejo scope in .npmrc first; see the quickstart.
 
 # The CLI ships as a Python package and is shared across all language
 # bindings -- one shell, one trust manager, one contract generator,
@@ -146,9 +129,9 @@ aster --version
 
 ---
 
-## Chapter 1: Your First Agent Check-In (5 min)
+## Chapter 1: Your first agent check-in
 
-**Goal:** The full working version of what you just saw — define a service,
+**Goal:** Define a service,
 start it, call it.
 
 <Tabs syncKey="language">
@@ -256,7 +239,8 @@ main();
 npx aster-gen
 
 # Start the control plane
-node control.ts
+npx tsc
+node control.js
 # → aster1Qmxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 #   ^^^^^^^ this is your control plane's public-key address — copy it for the next step
 ```
@@ -289,7 +273,7 @@ aster call aster1Qm... MissionControl.getStatus --% {"agent_id": "edge-node-7"}
 > **`aster shell` vs `aster call`:** Use `aster shell` for interactive
 > exploration — browsing services, tab-completing methods, streaming.
 > Use `aster call` for scripting and one-shot invocations. Both use
-> JSON serialization under the hood.
+> contract-derived XLANG serialization for RPC payloads.
 
 **What just happened:**
 - Decorators defined a typed RPC contract
@@ -302,7 +286,7 @@ aster call aster1Qm... MissionControl.getStatus --% {"agent_id": "edge-node-7"}
 
 ---
 
-## Chapter 2: Live Log Streaming (5 min)
+## Chapter 2: Live log streaming
 
 **Goal:** Agents push logs into the control plane. Operators tail them
 in real time using server streaming.
@@ -527,7 +511,8 @@ main();
 
 ```bash
 npx aster-gen
-node control.ts
+npx tsc
+node control.js
 # → aster1Qmxxxxxxxx... ← this is a NEW address; the old one is gone
 ```
 
@@ -557,7 +542,7 @@ async def main():
         sys.exit(1)
 
     async with AsterClient(address=sys.argv[1]) as client:
-        mc = client.proxy("MissionControl")
+        mc = await client.proxy("MissionControl")
 
         levels = ["info", "warn", "error"]
         messages = ["disk 92% full", "health check failed", "cpu spike detected"]
@@ -600,7 +585,7 @@ async function main() {
 
     const client = new AsterClientWrapper({ address });
     await client.connect();
-    const mc = client.proxy("MissionControl");
+    const mc = await client.proxy("MissionControl");
 
     const levels = ["info", "warn", "error"];
     const messages = ["disk 92% full", "health check failed", "cpu spike detected"];
@@ -693,7 +678,7 @@ The proxy uses a different call form per RPC pattern, mirroring what each one ac
 
 ---
 
-## Chapter 3: Metric Ingestion (5 min)
+## Chapter 3: Metric ingestion
 
 **Goal:** Agents push thousands of metric datapoints per second using
 client streaming.
@@ -761,7 +746,7 @@ async def main():
         sys.exit(1)
 
     async with AsterClient(address=sys.argv[1]) as client:
-        mc = client.proxy("MissionControl")
+        mc = await client.proxy("MissionControl")
 
         async def metrics():
             for i in range(10_000):
@@ -944,7 +929,7 @@ import {
 } from '@aster-rpc/aster';
 ```
 
-**Re-run `npx aster-gen`** (to pick up the new method), then restart `control.ts` (`Ctrl+C` then `node control.ts`) and copy the new address.
+**Re-run `npx aster-gen`** (to pick up the new method), then restart `control.ts` (`Ctrl+C` then `npx tsc` and `node control.js`) and copy the new address.
 
 Save this as `metrics.ts` in a **second terminal** to push 10,000 metric points:
 
@@ -962,7 +947,7 @@ async function main() {
 
     const client = new AsterClientWrapper({ address });
     await client.connect();
-    const mc = client.proxy("MissionControl");
+    const mc = await client.proxy("MissionControl");
 
     async function* metrics() {
         for (let i = 0; i < 10_000; i++) {
@@ -995,7 +980,7 @@ The full file extends Chapter 2's `control.ts` with the `MetricPoint`, `IngestRe
 </Tabs>
 
 The proxy client discovers methods from the contract and sends plain
-objects over the wire. Great for scripting, prototyping, and generic
+objects over the wire. This supports scripting, prototyping, and generic
 gateways.
 
 **What just happened:**
@@ -1007,7 +992,7 @@ gateways.
 
 ---
 
-## Chapter 4: Agent Sessions & Remote Commands (5 min)
+## Chapter 4: Agent sessions and remote commands
 
 **Goal:** Each agent gets its own session — register, heartbeat, and
 execute commands. This is where per-agent state and bidi streaming meet.
@@ -1016,7 +1001,7 @@ execute commands. This is where per-agent state and bidi streaming meet.
 same state. But each agent needs its own identity, capabilities, and
 command channel. That's a session-scoped service.
 
-This chapter adds a brand-new class — `AgentSession` — alongside `MissionControl` in the same `control.py` / `control.ts` file. Crucially, you'll also need to **add `AgentSession()` to your server's `services=[...]` list**, otherwise it won't be reachable. The full file is at the end of the chapter.
+This chapter adds a class — `AgentSession` — alongside `MissionControl` in the same `control.py` / `control.ts` file. You must also **add `AgentSession()` to your server's `services=[...]` list**, otherwise it won't be reachable. The full file is at the end of the chapter.
 
 <Tabs syncKey="language">
 <TabItem label="Python">
@@ -1407,7 +1392,7 @@ Two service types, two different lifetimes:
 
 ---
 
-## Chapter 5: Auth & Capabilities (5 min)
+## Chapter 5: Authentication and capabilities
 
 **Goal:** Not every caller should be able to deploy or run commands on agents.
 Define roles, compose requirements, and issue scoped credentials.
@@ -1634,7 +1619,7 @@ aster enroll node --role consumer --name "ops-team" \
 :::note[Quiet mode for scripts]
 Pass `--quiet` (or `-q`) to suppress the educational output. The
 command prints exactly one line: `<path> <endpoint_id> <expires_iso>`
-on success and exits non-zero on failure. Easy to parse from CI.
+on success and exits non-zero on failure.
 :::
 
 ### Step 5: Connect with credentials
@@ -1650,7 +1635,7 @@ client = AsterClient(
     enrollment_credential_file="edge-node-7.cred",
 )
 await client.connect()
-mc = client.proxy("MissionControl")
+mc = await client.proxy("MissionControl")
 
 await mc.getStatus({"agent_id": "test"})     # ✓ has ops.status
 await mc.ingestMetrics(...)                   # ✓ has ops.ingest
@@ -1666,7 +1651,7 @@ const client = new AsterClientWrapper({
     enrollmentCredentialFile: "edge-node-7.cred",
 });
 await client.connect();
-const mc = client.proxy("MissionControl");
+const mc = await client.proxy("MissionControl");
 
 await mc.getStatus({ agent_id: "test" });     // ✓ has ops.status
 await mc.ingestMetrics(...);                   // ✓ has ops.ingest
@@ -1695,7 +1680,7 @@ AgentSession~ runCommand command="df"  # ✓ ops-team has ops.admin
 
 ---
 
-## Chapter 6: Cross-Language Interop (5 min)
+## Chapter 6: Cross-language interoperability
 
 **Goal:** Your teammate uses a different language. They don't have your
 source code — just the server address.
@@ -1722,7 +1707,7 @@ async function main() {
     const client = new AsterClientWrapper({ address });
     await client.connect();
 
-    const mc = client.proxy("MissionControl");
+    const mc = await client.proxy("MissionControl");
     const status = await mc.getStatus({ agent_id: "ts-worker-1" });
     console.log(`Status: ${status.agent_id} is ${status.status}`);
 
@@ -1763,7 +1748,7 @@ async def main():
         sys.exit(1)
 
     async with AsterClient(address=sys.argv[1]) as client:
-        mc = client.proxy("MissionControl")
+        mc = await client.proxy("MissionControl")
         status = await mc.getStatus({"agent_id": "py-worker-1"})
         print(f"Status: {status['agent_id']} is {status['status']}")
 
@@ -1803,7 +1788,7 @@ python py-agent.py aster1Qm...
 
 ## What's Next?
 
-You just built a working control plane with four RPC patterns, session-scoped
+The walkthrough covers a control plane with four RPC patterns, session-scoped
 agents, capability-based auth, and cross-language interop. That's a real
 system — not a demo.
 

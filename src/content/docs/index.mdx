@@ -6,16 +6,18 @@ tableOfContents: false
 
 import { LinkCard } from '@astrojs/starlight/components';
 
-Aster is an enterprise peer-to-peer application SDK. Define a typed service,
+Aster is a peer-to-peer application SDK. Define a typed service,
 connect to a peer by its cryptographic identity, and control which calls it may
 make. Use the SDK to connect services across developer machines, customer
 networks, and cloud instances.
 
-## Start with a working service
+Aster 0.3.893 is a public preview. It provides Rust, Python, TypeScript, Go, Java, and .NET APIs against the shared Rust engine. See [what is Aster?](/docs/overview/what-is-aster/) for language status and [why Aster?](/docs/overview/why-aster/) for the deployment requirements it addresses.
+
+## Try the preview
 
 Create a service and call it from a second process. The quickstart includes
-Python and TypeScript examples. You can follow the steps yourself or copy an
-instruction into your coding harness.
+Python and TypeScript examples. These guides have not yet been validated word for word on a clean host for
+0.3.893. Package versions on PyPI and npm may differ from the Forgejo preview.
 
 <LinkCard title="Your first service" description="Install Aster, start a producer, and make a call." href="/docs/quickstart/python/" />
 <LinkCard title="Build MissionControl" description="Agent check-ins, logs, metrics, sessions, and operator access." href="/docs/quickstart/mission-control/" />

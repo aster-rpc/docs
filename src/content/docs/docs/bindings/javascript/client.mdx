@@ -4,7 +4,7 @@ slug: "docs/bindings/typescript/client"
 ---
 
 
-# TypeScript Client Reference
+# TypeScript client reference
 
 ## AsterClientWrapper
 
@@ -18,8 +18,8 @@ const client = new AsterClientWrapper({
 });
 await client.connect();
 
-// Dynamic proxy: speaks JSON, no local types needed
-const hello = client.proxy("Hello");
+// Dynamic proxy: synthesizes XLANG types from the contract
+const hello = await client.proxy("Hello");
 const reply = await hello.sayHello({ name: "World" });
 console.log(reply.message);
 
@@ -42,7 +42,7 @@ await client.close();
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `connect()` | `Promise<void>` | Run consumer admission against the producer and discover services |
-| `proxy(name)` | `ProxyClient` | Dynamic proxy for a service. Speaks JSON; no codegen needed. |
+| `proxy(name)` | `ProxyClient` | Dynamic proxy using manifest-synthesized XLANG types. |
 | `client(ServiceClass)` | `Promise<typed client>` | Typed client built from a generated client class |
 | `session(name)` | `Promise<SessionProxyClient>` | Open a multiplexed session against a session-scoped service |
 | `close()` | `Promise<void>` | Close the underlying QUIC connections |

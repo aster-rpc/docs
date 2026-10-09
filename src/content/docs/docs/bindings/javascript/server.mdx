@@ -4,7 +4,7 @@ slug: "docs/bindings/typescript/server"
 ---
 
 
-# TypeScript Server Reference
+# TypeScript server reference
 
 ## AsterServer
 
@@ -129,12 +129,11 @@ class Invoice {
 
 ## Interceptors
 
-All 9 interceptors from the Python binding are available:
+The TypeScript binding exports these interceptors:
 
 ```typescript
 import {
   DeadlineInterceptor,
-  MetricsInterceptor,
   RetryInterceptor,
   RateLimitInterceptor,
   AuthInterceptor,
@@ -144,8 +143,9 @@ import {
   CapabilityInterceptor,
 } from '@aster-rpc/aster';
 
-const metrics = new MetricsInterceptor();
 const rateLimit = new RateLimitInterceptor({ globalRps: 1000, perServiceRps: 500 });
 ```
 
-See the [Python Server Reference](/docs/bindings/python/server) for detailed interceptor documentation — the TypeScript API mirrors it exactly.
+See the [Python Server Reference](/docs/bindings/python/server) for detailed interceptor documentation — check TypeScript constructor options when adapting Python examples.
+
+Built-in RPC metrics are recorded in the shared Rust telemetry pipeline. See [observability](/docs/guides/observability) for configuration.
