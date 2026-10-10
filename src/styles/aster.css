@@ -1,5 +1,5 @@
-@font-face { font-family: Geist; src: url('/fonts/geist/Geist-VariableFont_wght.ttf') format('truetype'); font-weight: 100 900; font-display: swap; }
-@font-face { font-family: 'IBM Plex Mono'; src: url('/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: Geist; src: url('/docs-fonts/geist/Geist-VariableFont_wght.ttf') format('truetype'); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('/docs-fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
 :root {
   --sl-font: Geist, system-ui, sans-serif;
   --sl-font-mono: 'IBM Plex Mono', ui-monospace, monospace;

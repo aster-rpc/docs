@@ -1,6 +1,6 @@
 # Aster documentation
 
-The public documentation at <https://docs.aster.site> uses Astro and Starlight.
+The public documentation at <https://sdk.getaster.now/docs/> uses Astro and Starlight.
 
 ## Development
 
@@ -40,6 +40,17 @@ Internal notes under `_internal/` are ignored and are not published.
 
 ## Deployment
 
-Pushing `main` runs `.github/workflows/deploy.yml`. It installs with `npm ci`,
-builds the site, and deploys `dist/` to GitHub Pages. `public/CNAME` preserves the
-custom domain. The workflow can also be started manually.
+GitHub Actions validates the docs build on pushes to `main` and pull requests.
+The `aster-rpc/website` repository owns publishing to Cloudflare Workers Static
+Assets at <https://sdk.getaster.now>. It builds both repositories into one site,
+including `/docs/`, `/api/`, Pagefind search and Go discovery.
+
+The website publishing workflow checks for changed docs revisions every 15
+minutes (GitHub scheduling can delay runs). For immediate publication, manually
+run **Publish SDK site to Cloudflare** in `aster-rpc/website`. Website pushes
+also publish the latest docs main revision. The deployed `/deployment.json`
+records both source commits. This repository no longer deploys to GitHub Pages.
+
+Docs emits its home at `/docs/`; existing `/docs/...` and `/api/...` routes
+remain intact. Generated assets use `/_docs/` and bundled fonts use
+`/docs-fonts/` to avoid collisions with the landing page.

@@ -2,9 +2,9 @@ Build the first chapter of Aster's MissionControl example in Python in the
 current workspace.
 
 Sources:
-- https://docs.aster.site/docs/quickstart/mission-control
+- https://sdk.getaster.now/docs/quickstart/mission-control
 - https://github.com/aster-rpc/aster-rpc/tree/main/examples/python/mission_control
-- https://docs.aster.site/docs/bindings/python
+- https://sdk.getaster.now/docs/bindings/python
 
 Read the walkthrough and inspect the public example source. Focus on the first
 agent check-in and its unary status call. Use the request types, service name,

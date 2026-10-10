@@ -2,7 +2,8 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: 'https://docs.aster.site',
+  site: 'https://sdk.getaster.now',
+  build: { assets: '_docs' },
   integrations: [starlight({
     title: 'Aster',
     description: 'Documentation for the enterprise peer-to-peer application SDK.',
@@ -17,7 +18,7 @@ export default defineConfig({
     "items": [
       {
         "label": "Introduction",
-        "slug": "index"
+        "slug": "docs"
       },
       {
         "label": "Your first service",
@@ -191,7 +192,7 @@ export default defineConfig({
       },
       {
         "label": "Python API",
-        "link": "https://docs.aster.site/api/python/aster/public.html"
+        "link": "https://sdk.getaster.now/api/python/aster/public.html"
       },
       {
         "label": "TypeScript API",
