@@ -1,0 +1,155 @@
+---
+title: Java and Kotlin server
+description: Generate JVM service dispatchers, register handlers, manage sessions, and configure server policy.
+slug: docs/bindings/java/server
+---
+
+The JVM server uses the shared Rust dispatcher and runs application handlers
+on Java virtual threads. Java annotation processing and Kotlin KSP generate
+adapters for the same runtime.
+
+The [JVM tutorial](/docs/quickstart/java/) includes a complete Maven project,
+annotation processing, native loading, and a tested Java server/client pair.
+The server owns its node and dispatcher; your application supplies handlers,
+codec registration, and any external resources used by those handlers.
+
+Start with a generated unary service. For incremental results or input, add
+an explicit streaming dispatcher. For private state spanning calls, register
+a session factory. These are separate choices from admission policy.
+
+## Define services and payloads
+
+```java
+@Service(name = "Echo", version = 1)
+public final class Echo {
+    @WireType("hello/Request") public record Request(String name) {}
+    @WireType("hello/Response") public record Response(String message) {}
+
+    @Rpc public Response hello(Request request) {
+        return new Response("Hello, " + request.name() + "!");
+    }
+}
+```
+
+Import annotations from `site.aster.annotations`. The annotation processor
+emits a `ServiceDispatcher` and service-provider metadata. Keep those generated
+classes and resources in the application JAR. Register an implementation with
+`builder.service(instance)` or explicitly pass its dispatcher with
+`builder.service(instance, dispatcher)`.
+
+The codec also needs runtime type registration. Supplying an
+annotated service does not automatically register its payloads with the pooled
+`ForyCodec`. Register every payload on each server/client codec:
+
+```java
+var codec = new ForyCodec();
+ForyTags.register(codec.fory(), Echo.Request.class, "hello/Request");
+ForyTags.register(codec.fory(), Echo.Response.class, "hello/Response");
+```
+
+Use `site.aster.codec.ForyTags` for slash-separated wire names so the namespace
+matches other languages. Include nested payload types too.
+
+## Start and stop
+
+```java
+var config = AsterConfig.builder()
+    .relayMode("disabled").bindAddr("127.0.0.1:0")
+    .allowAllConsumers(true).build(); // Local development only.
+try (var server = AsterServer.builder().config(config).codec(codec)
+        .service(new Echo()).build().get(15, TimeUnit.SECONDS)) {
+    System.out.println(server.nodeId());
+    // Keep your application running while the server is needed.
+}
+```
+
+`build()` returns a `CompletableFuture<AsterServer>`; serving starts during
+construction. Closing the `AutoCloseable` server stops its dispatcher and
+owned node. A future timeout only bounds the wait: retain ownership of any
+startup that may complete later so its returned server can be closed.
+
+| Builder method | Purpose |
+| --- | --- |
+| `config` | Node configuration and trust settings |
+| `codec` | Payload codec and its registered types |
+| `service` | Shared implementation and optional explicit dispatcher |
+| `sessionService` | Per-session factory and optional dispatcher |
+| `interceptors` | Application request/response/error hooks |
+| `maxSessionsPerConnection` | Native session resource limit |
+| `ringCapacity` | Native dispatch event queue size |
+| `health` | Optional health/readiness/metrics listener |
+| `alpns` | Additional accepted protocols for explicit integrations |
+
+## Handler patterns
+
+| Annotation | Pattern |
+| --- | --- |
+| `@Rpc` | One request and one response |
+| `@ServerStream` | One request, multiple responses |
+| `@ClientStream` | Multiple requests, one response |
+| `@BidiStream` | Incremental input and output |
+
+The runtime accepts the corresponding `UnaryDispatcher`,
+`ServerStreamDispatcher`, `ClientStreamDispatcher`, or `BidiStreamDispatcher`.
+At that SPI boundary, streams use encoded byte arrays through `RequestStream`
+and `ResponseStream`; the codec converts them to application payloads.
+
+Java APT generates working unary bodies but emits throwing stubs
+for all three streaming patterns. Kotlin KSP uses the same emitter. Implement
+streaming dispatchers explicitly and register them with `service(instance,
+dispatcher)`. The [JVM tutorial](/docs/quickstart/java/) includes a tested
+`ServerStreamDispatcher`; client and bidi streams use their corresponding SPI
+interfaces. Kotlin coroutine `Flow` is not the runtime's stream type.
+
+Handlers receive a `CallContext` through the dispatcher. `CallContext.current()`
+provides the context in generated handler invocations. Inspect cancellation
+and expiry during long work and propagate those signals into downstream I/O.
+Do not hold shared locks while waiting on stream backpressure.
+
+## Sessions
+
+Use `@Service(..., scoped = Scope.SESSION)` and register the implementation
+class with `sessionService(Impl.class, peerId -> new Impl(...))`. The server
+creates state for each connection-scoped session ID. Several independent
+sessions may share one peer connection. Implement `AutoCloseable` when session
+state owns resources and synchronize mutable state accessed by concurrent calls.
+
+## Admission and capabilities
+
+The JVM runtime includes consumer-admission support. Open development mode
+uses `allowAllConsumers(true)`; protected deployments need a configured root
+and valid consumer credentials. The client guide explains its admission
+handshake and the direct-RPC option for peers without that protocol.
+
+Service and method descriptors can carry `CapabilityRequirement` values.
+`setPeerAttributes(peerId, attributes)` supplies verified attributes to Rust's
+checks; `clearPeerAttributes` removes them. Request metadata must not be
+trusted as role evidence. Admission and method authorization are separate
+steps: admitting a peer does not satisfy every role requirement.
+
+## Deadlines and errors
+
+Rust enforces dispatch deadlines. `CallContext.isCancelled()` and
+`isExpired()` let handlers stop application work. Throw `RpcError` with a
+`StatusCode` for deliberate application refusals; unexpected exceptions become
+internal failures. Keep sensitive details in server logs rather than public
+error messages.
+
+Cancellation is cooperative for application work and does not undo committed
+writes. Session and server cleanup must also release application-owned files,
+subscriptions, and other resources.
+
+## Kotlin and operations
+
+Kotlin uses the same `AsterServer`, `AsterConfig`, and `ForyCodec` classes. KSP
+is needed for services declared in Kotlin; consuming an already generated Java
+service needs no second processor. Use `use` for `AutoCloseable` owners and
+retain the owner while futures are in flight. The [Kotlin guide](/docs/bindings/java/kotlin/)
+shows this path and explains coroutine cancellation boundaries.
+
+`node()`, `manifest()`, `contractId(serviceName)`, `liveCalls()`, and `health()`
+provide node and operational views. Rust metrics/traces share one pipeline;
+logs bridge to SLF4J. Configure a logging provider to see those records.
+
+Continue with the [JVM client](/docs/bindings/java/client/),
+[trust model](/docs/concepts/trust-model/), and [operations](/docs/guides/operations/).

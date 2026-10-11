@@ -1,12 +1,56 @@
 ---
 title: Contract identity
 slug: "docs/concepts/contract-identity"
+description: "Understand how Aster identifies service interfaces across languages and distinguishes contracts during a rollout."
 ---
 
 import DocsDiagram from '@components/DocsDiagram.astro';
 
 
-In Aster, every service contract has a deterministic, content-derived identity. The `contract_id` is the BLAKE3 hash of the contract's canonical byte representation. Implementations compute it from the contract definition.
+A service contract describes the calls a service accepts: its methods, request
+and response types, and contract settings. Aster derives a **contract ID** from
+that description so clients and providers can identify the interface they
+intend to use, even when they are written in different languages.
+
+Suppose a Python client calls a Rust catalog service. Both need to agree on
+what a lookup request contains and what the response means on the wire. A
+service name alone cannot distinguish two versions with different response
+types. A contract ID gives each canonical interface its own identity.
+
+## When contract identity matters
+
+You encounter contract IDs when [discovering a service](/docs/concepts/discovery/),
+connecting implementations written in different languages, or rolling out an
+interface change. The ID identifies the interface; the endpoint identity
+identifies the peer hosting it. A peer can host several services.
+
+For example, changing a catalog response type changes the contract ID. During
+a rollout, providers can continue advertising the old contract while clients
+move to the new one. An old client can look for its existing contract rather
+than assuming that every service named Catalog accepts the same calls.
+
+Matching IDs establish agreement on the contract description. They do not
+establish that the caller is authorized, that implementations behave identically,
+or that every payload works across bindings. Apply the
+[trust model](/docs/concepts/trust-model/) and test the calls your application
+uses. Contract identity also does not automatically translate between versions.
+
+You normally define a service using your language's service APIs. The following
+sections explain how its identity is derived and what affects that identity;
+the [service definition guide](/docs/guides/define-a-service/) covers the
+application workflow.
+
+## Changes during a rollout
+
+| Change | Contract consequence | Application action |
+| --- | --- | --- |
+| Replace a handler implementation without changing its descriptor | ID stays the same | Test behavior and authorization independently |
+| Change a request field's wire type | Referencing contract gets a new ID | Keep compatible providers available while clients migrate |
+| Change a method pattern or declared requirement | Descriptor and ID change | Compare generated contracts and retest callers |
+
+A version or channel name helps people organize a rollout; it cannot make two
+different canonical interfaces interchangeable. See
+[discovery](/docs/concepts/discovery/) for provider advertisements and channels.
 
 ## Content-addressed identity
 
@@ -22,15 +66,17 @@ contract_id = blake3(canonical_xlang_bytes(ServiceContract))
 
 For content addressing to work across languages, the serialized bytes must be identical regardless of which language produces them. Aster defines a constrained serialization profile called the **canonical XLANG profile**:
 
-- **Fields emitted in ascending field ID order.** The canonical profile fixes the order independently of declaration order.
+- **Canonical field IDs.** Canonicalization assigns 1-based IDs from NFC-normalized field-name ordering, independently of declaration order and caller-supplied IDs.
 - **Schema-consistent mode.** No per-object type metadata in the payload. Types are known statically from the contract definition.
-- **No reference tracking.** Contract descriptors are acyclic trees (with self-references handled by a placeholder mechanism), so reference tracking overhead is unnecessary.
+- **No reference tracking.** Recursive back edges use explicit named self-references, so object reference tracking is unnecessary.
 - **Standalone serialization.** No session context, no shared caches, no state from prior objects. Each canonical byte sequence is self-contained.
 - **No compression.** Canonical bytes are stored and hashed uncompressed.
 - **UTF-8 strings.** All strings are encoded as UTF-8, even though Fory may normally choose LATIN1 or UTF-16 opportunistically.
-- **NFC-normalized identifiers.** Method names, type names, package names, and other identifiers are normalized to Unicode NFC form before encoding. This prevents different Unicode representations of the same visual string from producing different hashes.
+- **NFC-normalized identifiers.** The profile requires Unicode NFC names. Low-level descriptor writers serialize the supplied names, so code constructing descriptors directly must supply normalized identifiers.
 
-With these constraints, a conforming Fory implementation in any language produces byte-identical output for the same contract definition.
+Aster uses a dedicated canonical encoder for contract identity. Use the SDK's
+contract APIs to obtain these bytes; ordinary payload serialization with Fory
+is not a substitute for that encoder.
 
 ## Type graph: a Merkle DAG
 
@@ -44,7 +90,10 @@ This gives you automatic change detection. If a type changes, every contract tha
 
 ### Self-references and cycles
 
-Type graphs can contain self-references (e.g., a tree node type that references itself). The canonical encoding handles this with an SCC-based (strongly connected component) cycle-breaking algorithm. Self-referential types use a placeholder hash in place of their own hash when computing canonical bytes, ensuring the encoding terminates and remains deterministic.
+A type can refer back to itself, as a tree node does when it contains child
+nodes. The canonical representation records a cycle back edge using a named
+`SelfRef` rather than recursively embedding the referenced type. This lets
+recursive definitions have a finite canonical representation.
 
 ## ServiceContract
 
@@ -83,16 +132,10 @@ Methods can declare authorization requirements that the trust model enforces:
 | Kind | Meaning |
 | --- | --- |
 | `ROLE` | Caller must have a specific role attribute |
-| `ANY_OF` | Caller must have at least one of the listed capabilities |
-| `ALL_OF` | Caller must have all of the listed capabilities |
+| `ANY_OF` | Caller must have at least one of the listed roles |
+| `ALL_OF` | Caller must have all of the listed roles |
 
-These requirements are checked by framework interceptors against the attributes in the caller's `CallContext`, which are populated from their verified enrollment credential.
-
-## What contract_id identifies
-
-The ID identifies a canonical interface. A changed interface produces a different ID, allowing discovery to distinguish providers of each contract. Old providers can continue advertising the old ID during a rollout.
-
-Matching IDs establish agreement on the hashed descriptor. They do not prove matching application behavior, authorization policy, or support for every value a serializer can encode. Test the payloads and call patterns used by your application across its language bindings.
+The shared Rust dispatcher checks declared requirements against the caller's verified attributes before invoking network handlers. The admission or authentication policy supplies those attributes; they are not granted by the contract itself. See the [trust model](/docs/concepts/trust-model/).
 
 ## ContractManifest
 

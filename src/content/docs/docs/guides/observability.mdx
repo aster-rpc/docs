@@ -4,7 +4,34 @@ description: Configure the shared Rust telemetry pipeline, application metrics, 
 slug: "docs/guides/observability"
 ---
 
-Aster’s Rust `aster-otel` pipeline owns telemetry exporters, built-in RPC metrics, tracing, and the log bridge. Language bindings configure that pipeline and provide application-level helpers. The examples below use Python and have been checked against source; this page has not been followed on a clean host for the preview.
+Observability helps you determine where a call is failing or spending time.
+Use logs for individual events, metrics for counts and trends, and traces to
+follow work across service boundaries. For example, a slow catalog lookup
+may come from connection establishment, handler work, or a downstream store;
+a trace helps distinguish those stages.
+
+Aster's shared Rust telemetry pipeline exports built-in RPC measurements and
+application telemetry. Language bindings connect it to their logging systems.
+You need a working service before using the snippets below, and a collector
+if you want remote export. Collector authentication and delivery must be
+verified in your own deployment.
+
+## Language integration
+
+| Language | Logging integration |
+| --- | --- |
+| Rust | `tracing`; the application installs its subscriber |
+| Python | Standard `logging` |
+| TypeScript | Language logger over the native bridge |
+| Go | `log/slog` |
+| Java | SLF4J |
+| .NET | `Microsoft.Extensions.Logging` |
+
+For Rust, enable the `otel` Cargo feature for the shared telemetry integration
+or `health` for the health/Prometheus listener, which also enables `otel`.
+Plain Rust logging does not require an exporter. For example, an application
+with a `tracing-subscriber` environment filter can use `RUST_LOG=warn,aster=debug`.
+The binding pipeline's Rust filter is configured through `ASTER_LOG`.
 
 ## Configure the pipeline
 
@@ -101,6 +128,12 @@ curl http://127.0.0.1:8080/metrics
 `AsterServer.drain(grace_period=10.0)` asks the RPC server to stop accepting work and gives in-flight requests a bounded period to complete. Call `close()` afterward or let the async context manager close it. Applications connect their own shutdown mechanism to these methods.
 
 Call `observability.flush()` to request a telemetry flush and `observability.shutdown()` when releasing the process’s pipeline references. Exporter timeouts can leave flushing in the background; these calls do not establish durable audit delivery.
+
+## Verify an observed request
+
+Start the working [Python producer](/docs/quickstart/python/) with the health port above, make one greeting call, and query the three routes. Expect successful liveness/readiness status once serving and all checks pass, plus Prometheus text containing RPC instruments after work is recorded. Match the service name in your collector and confirm the request trace arrives there; a local metrics response does not prove OTLP delivery.
+
+For an application that requires a synchronized catalog, register its readiness check before serving and leave it false until the needed content is available. Expect `/readyz` to report failure while `/healthz` can remain successful. Disconnect the collector to check exporter diagnostics independently of application readiness. Collector installation, credentials, and clean-host export qualification remain deployment work.
 
 ## Next steps
 

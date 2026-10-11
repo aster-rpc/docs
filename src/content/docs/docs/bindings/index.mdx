@@ -1,0 +1,66 @@
+---
+title: Choose a language
+description: Find setup, server, and client guides for every Aster language and compare release-specific differences.
+slug: docs/bindings
+---
+
+Every supported language can host services and call them through the shared
+Rust engine. Choose a language below for a complete first-service project and
+separate server and client references for its runtime APIs.
+
+| Language | Setup and example | Server | Client |
+| --- | --- | --- | --- |
+| [Rust](/docs/bindings/rust/) | [First service](/docs/quickstart/rust/) | [Server](/docs/bindings/rust/server/) | [Client](/docs/bindings/rust/client/) |
+| [Python](/docs/bindings/python/) | [First service](/docs/quickstart/python/) | [Server](/docs/bindings/python/server/) | [Client](/docs/bindings/python/client/) |
+| [TypeScript](/docs/bindings/typescript/) | [First service](/docs/quickstart/python/) | [Server](/docs/bindings/typescript/server/) | [Client](/docs/bindings/typescript/client/) |
+| [Go](/docs/bindings/go/) | [First service](/docs/quickstart/go/) | [Server](/docs/bindings/go/server/) | [Client](/docs/bindings/go/client/) |
+| [Java and Kotlin](/docs/bindings/java/) | [First service](/docs/quickstart/java/) · [Kotlin](/docs/bindings/java/kotlin/) | [Server](/docs/bindings/java/server/) | [Client](/docs/bindings/java/client/) |
+| [.NET](/docs/bindings/dotnet/) | [First service](/docs/quickstart/dotnet/) | [Server](/docs/bindings/dotnet/server/) | [Client](/docs/bindings/dotnet/client/) |
+
+Each reference covers service registration or connection setup, all four RPC
+patterns, sessions, admission, deadlines, errors, resource ownership, and
+telemetry. Language syntax and convenience APIs differ, so use the guide for
+the binding you installed.
+
+## Choose a build workflow
+
+Start with the language your application already uses, then check how it
+creates wire metadata and loads the native runtime. Every language can be a
+producer, a consumer, or both; these roles describe which side hosts a method.
+
+| Language | Before the first call | Application responsibility |
+| --- | --- | --- |
+| Rust | Enable `rpc`; derive payloads and expand the service macro | Keep the node alive; register adapters and verified peer policy |
+| Python | Install the platform wheel; define decorated services | Keep async contexts alive; configure consumer admission |
+| TypeScript | Install native addon; run `aster-gen` and `tsc` | Load generated metadata; own process lifetime and transport closure |
+| Go | Set up pinned source, CGO, and matching native library | Register payloads and methods; pass contexts and close owners |
+| Java/Kotlin | Load native classifier; configure APT or KSP | Register codec types; implement streaming dispatchers; close owners |
+| .NET | Configure NuGet sources and matching native runtime | Register builders and payloads; dispose native owners |
+
+For evaluation, follow one first-service project above through its expected
+output. For deployment, continue to that binding's admission and shutdown
+sections and the [operations guide](/docs/guides/operations/).
+
+## Workflow differences
+
+- **Go installation:** the tested guide uses pinned public source and a local
+  module replacement. Public vanity-module installation remains unqualified.
+- **JVM generation:** Java APT and Kotlin KSP generate unary handlers. Streaming
+  uses explicit dispatchers; the JVM tutorial includes a working server stream.
+- **Admission:** Python, TypeScript, and JVM offer high-level consumer workflows.
+  Native Rust, Go, and .NET require explicit policy integration for protected
+  direct-RPC use.
+- **Sessions:** owners and cleanup APIs differ. JVM `ClientSession.close()`
+  is a no-op; connection closure reaps state.
+- **API catalogs:** hosted generated references currently cover Python and
+  TypeScript. Other languages have the server/client references above and
+  release-specific source/package documentation; see the [API index](/docs/reference/api/).
+
+The walkthroughs record their tested toolchain and platform. A working local
+example does not qualify every deployment platform or authorize production
+access. See [release compatibility](/docs/reference/compatibility/) for the
+shared runtime and intentional feature boundaries.
+
+Continue with [contracts](/docs/concepts/contract-identity/),
+[trust](/docs/concepts/trust-model/), [data](/docs/guides/data/), or
+[coordination](/docs/guides/coordination/).

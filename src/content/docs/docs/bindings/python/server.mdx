@@ -1,31 +1,47 @@
 ---
-title: AsterServer
+title: Python server
 description: AsterServer reference -- constructor, lifecycle, unified node, admission flags, and iroh protocol access.
 slug: "docs/bindings/python/server"
 ---
 
-import MermaidDiagram from '@components/MermaidDiagram.astro';
+import ProtocolMap from '@components/ProtocolMap.astro';
 
+`AsterServer` makes Python service methods callable by other peers. It owns
+one Iroh node and the RPC dispatcher; your application supplies decorated
+handlers and owns any files, downstream requests, or subscriptions they use.
+The same node can also provide blobs, documents, and gossip, each with its own
+capability and resource requirements.
 
-# AsterServer reference
+## Before you start
 
-`AsterServer` is the high-level, declarative way to stand up an Aster RPC producer. It creates a single iroh node that serves blobs, docs, gossip, Aster RPC, and admission -- all on one endpoint, one node ID. You hand it your service implementations, and it handles the rest.
+Follow the [complete Python tutorial](/docs/quickstart/python/) for installation
+and matching producer/consumer definitions. The fragments here assume their
+named service classes are available. Start with a shared unary service; add
+streams for incremental messages or a session factory for private state across
+calls. Protected access also needs a deployment trust root and provisioned
+consumer credentials; a public ticket alone grants no permission.
 
-## The basics
+## Register and serve
 
 ```python
 from aster import AsterServer
 from my_services import HelloService
 
-async with AsterServer(services=[HelloService()]) as srv:
+async with AsterServer(services=[HelloService()], allow_all_consumers=True) as srv:
     print(f"Listening at: {srv.address}")
     await srv.serve()  # blocks until Ctrl+C
 ```
 
-That is a complete producer. The `async with` block calls `start()` (creates the node) and `serve()` (launches accept loops), then `close()` on exit.
-
+This development fragment permits unenrolled consumers and requires the
+imported service implementation. Entering the context starts the node and
+launches serving; awaiting `serve()` keeps this task alive. Exiting the context
+closes the server. Use the tutorial for the complete runnable program.
 
 ## Constructor
+
+This signature sketch uses application-supplied values. Optional overrides
+are only needed when configuration and identity loading do not supply them;
+`trusted_root_public_key` must contain the deployment's 32-byte public key.
 
 ```python
 AsterServer(
@@ -33,9 +49,9 @@ AsterServer(
     config=AsterConfig(...),                        # optional
     identity=".aster-identity",                    # optional: path to identity file
     peer="billing-producer",                       # optional: select peer from identity file
-    root_pubkey=b'\x01\x02...',                     # optional override
+    root_pubkey=trusted_root_public_key,                     # optional override
     allow_all_consumers=True,                       # optional override
-    allow_all_producers=False,                      # optional override
+    allow_all_producers=True,                      # optional override
     codec=ForyCodec(...),                           # optional
     interceptors=[DeadlineInterceptor()],           # optional
 )
@@ -43,7 +59,10 @@ AsterServer(
 
 ### `services` (required)
 
-A list of `@service`-decorated class instances. At least one is required -- `AsterServer` raises `ValueError` if the list is empty.
+Pass `@service`-decorated instances for shared services and decorated classes
+for session-scoped factories. At least one service is required; an empty list
+raises `ValueError`. A session class must accept `peer` in its constructor so
+the runtime can create a fresh instance for each connection-scoped session.
 
 ```python
 from aster import service, rpc
@@ -70,11 +89,16 @@ Selects a peer entry from the `.aster-identity` file by name. When an `.aster-id
 
 ```python
 # With identity file -- loads node key + root_pubkey from .aster-identity:
-async with AsterServer(services=[MyService()], identity=".aster-identity", peer="billing-producer") as srv:
+async with AsterServer(services=[MyService()], identity=".aster-identity", peer="billing-producer", allow_all_consumers=False) as srv:
     await srv.serve()
 ```
 
-If `identity` is omitted, `AsterServer` auto-detects `.aster-identity` in the current directory (or the path set by `ASTER_IDENTITY_FILE`). If `peer` is omitted, it auto-selects the first `[[peers]]` entry with `role = "producer"`. If no identity file is found, the node runs in dev mode (ephemeral identity, open gates).
+If `identity` is omitted, `AsterServer` auto-detects `.aster-identity` in the current directory (or the path set by `ASTER_IDENTITY_FILE`). If `peer` is omitted, it auto-selects the first `[[peers]]` entry with `role = "producer"`. Without an identity file, explicit configuration still applies. Set
+`allow_all_consumers=True` explicitly for an ephemeral development server.
+
+For protected access, pass `allow_all_consumers=False` explicitly even when
+the identity entry supplies a root; wrapper development-mode detection also
+examines the base config.
 
 The identity file provides: the node `secret_key` (stable EndpointId), the `root_pubkey` (trust anchor for the mesh), and the signed enrollment credential. You do not need to set `root_pubkey`, `ASTER_SECRET_KEY`, or `ASTER_ROOT_PUBKEY_FILE` separately when using an identity file.
 
@@ -107,7 +131,7 @@ These keyword arguments override the corresponding `AsterConfig` fields when bot
 | `peer` | `str \| None` | `None` | Select a peer entry from `.aster-identity` by name |
 | `root_pubkey` | `bytes \| None` | Resolved from config or identity file | 32-byte ed25519 root public key (deployment trust anchor) |
 | `allow_all_consumers` | `bool \| None` | `False` | Skip consumer admission gate |
-| `allow_all_producers` | `bool \| None` | `True` | Skip producer mesh admission gate |
+| `allow_all_producers` | `bool \| None` | `True` | Compatibility option; keep True. False raises NotImplementedError |
 
 ### Serialization and interceptors
 
@@ -116,21 +140,57 @@ These keyword arguments override the corresponding `AsterConfig` fields when bot
 | `codec` | `ForyCodec \| None` | Auto-created XLANG codec | Custom Fory serialization codec |
 | `interceptors` | `list \| None` | `[]` | Server-side interceptors applied to every RPC call |
 
+## Handler patterns and sessions
+
+| Decorator | Handler shape |
+| --- | --- |
+| `@rpc` | Async request → response |
+| `@server_stream` | Async generator yielding responses |
+| `@client_stream` | Async request iterator → one response |
+| `@bidi_stream` | Async request iterator → async response generator |
+
+Use explicit wire types and matching request/response annotations. The
+[service guide](/docs/guides/services/) covers decorators and streaming examples.
+Yield responses incrementally, propagate cancellation into downstream work, and
+avoid holding shared locks while waiting for stream backpressure.
+
+`@service(..., scoped="session")` declares state for a connection-scoped
+session ID. Pass that decorated class, rather than an existing instance, in
+`services` so the runtime can construct private state. For a `CounterService`
+declared with session scope and a constructor accepting `peer`, registration is:
+
+```python
+# API fragment: CounterService and its payloads are defined by the application.
+server = AsterServer(services=[CounterService], allow_all_consumers=True)
+```
+
+This is open development registration; start and close it using the lifecycle
+below. Several sessions may share a connection, and calls within a session
+can overlap. Keep mutable state safe across asynchronous interleaving. See the
+[session guide](/docs/concepts/session-scoped-services/) for lifecycle and factories.
+
+Rust enforces effective call deadlines and capability requirements before
+application dispatch. Use typed RPC errors for intended application refusals;
+unexpected failures become internal statuses. Do not assume timeout or
+cancellation rolls back a completed mutation. Release application subscriptions
+and other resources before server shutdown.
 
 ## Lifecycle
+
+| Operation | State and application responsibility |
+| --- | --- |
+| Construct `AsterServer` | Hold configuration and service definitions; no running endpoint yet |
+| `await start()` | Create the node and service metadata; address becomes available |
+| `serve()` | Start dispatcher/handler tasks and return their task; await it to retain application lifetime |
+| `await close()` | Cancel server tasks and shut down the owned node; release application resources first |
+| `async with` | Perform startup and begin serving on entry; close on exit |
 
 ### Phase 1: `start()`
 
 Creates the iroh node and computes service metadata. Called automatically by `async with`.
 
-```
-start()
-  1. Determine which ALPNs to register (always "aster/1", plus admission ALPNs if gates are active)
-  2. Build EndpointConfig (enables hooks if Gate 0 is needed)
-  3. IrohNode.memory_with_alpns(alpns, config) -- creates the unified node
-  4. Compute ServiceSummary list (name, version, contract_id, channel addresses)
-  5. Create the internal Server (RPC dispatcher) bound to the node
-```
+Startup resolves configuration, creates the node, and registers service
+metadata. `serve()` owns the subsequent dispatcher and handler tasks.
 
 After `start()`, you can read properties like `srv.address` and `srv.services`.
 
@@ -139,20 +199,16 @@ After `start()`, you can read properties like `srv.address` and `srv.services`.
 Spawns background tasks and returns an `asyncio.Task`. The task runs until cancelled.
 
 ```python
-async with AsterServer(services=[HelloService()]) as srv:
+async with AsterServer(services=[HelloService()], allow_all_consumers=True) as srv:
     # serve() is called automatically by __aenter__, but you can also call it manually:
     task = srv.serve()  # returns an asyncio.Task (idempotent)
     await task           # blocks until cancellation
 ```
 
-`serve()` spawns up to two subtasks:
-
-1. **Accept loop** -- pulls `(alpn, connection)` tuples from `node.accept_aster()` and dispatches them:
-   - `aster/1` connections go to the RPC `Server.handle_connection()`
-   - `aster.consumer_admission` connections go to the consumer admission handler
-   - `aster.producer_admission` connections go to the producer mesh admission handler
-
-2. **Gate 0 hook loop** (only if any admission gate is active) -- drains the after-handshake hook channel and applies the `MeshEndpointHook` allowlist to every new QUIC connection.
+`serve()` starts the Rust dispatcher and its Python handler tasks. Rust accepts
+RPC connections and enforces Gate 0. Consumer-admission connections are
+forwarded to Python for credential verification and service discovery, including
+in open development mode. An optional background task registers published services.
 
 ### Phase 3: `close()`
 
@@ -162,15 +218,17 @@ Cancels all subtasks and shuts down the node. Called automatically by `async wit
 await srv.close()  # safe to call multiple times
 ```
 
-
 ## The unified node
 
 `AsterServer` builds one Iroh node with one endpoint ID. That endpoint serves:
 
-<MermaidDiagram source={"graph LR\n    E[\"One iroh endpoint\"] --> B[\"BLOBS_ALPN \u2192 iroh-blobs\"]\n    E --> D[\"DOCS_ALPN \u2192 iroh-docs\"]\n    E --> G[\"GOSSIP_ALPN \u2192 iroh-gossip\"]\n    E --> R[\"aster/1 \u2192 RPC Server\"]\n    E --> CA[\"aster.consumer_admission \u2192 admission handler\"]\n    E --> PA[\"aster.producer_admission \u2192 mesh admission\"]\n"} />
+<ProtocolMap producerAdmission={false} />
 
-The node shares its identity and connection pool across protocols. A consumer that has been admitted through the admission handshake can then call RPC methods, fetch blobs, subscribe to gossip topics, and sync docs -- through the same node identity and connection pool. Each QUIC connection negotiates one ALPN.
-
+The protocols share the node's identity and connection pool. Each QUIC
+connection negotiates one ALPN. Admission allows a peer through the configured
+connection gate; it does not grant every RPC role, document namespace, blob,
+or gossip capability. Supply the permissions required by the chosen protocol
+as described in the [data guide](/docs/guides/data/).
 
 ## Properties
 
@@ -190,6 +248,7 @@ srv.services  # list[ServiceSummary]
 ```
 
 Each `ServiceSummary` has:
+
 - `name` -- service name (from the `@service` decorator)
 - `version` -- service version (default 1)
 - `contract_id` -- deterministic BLAKE3 hash of the canonical service contract
@@ -226,7 +285,6 @@ node_id = srv.node.endpoint_id()
 | `srv.node` | `IrohNode` | Raw node (escape hatch for advanced use) |
 | `srv.endpoint` | `NetClient` | Low-level QUIC endpoint access |
 
-
 ## Admission flags
 
 ### Consumer admission (`allow_all_consumers`)
@@ -236,32 +294,26 @@ Controls whether consumers must present a credential before making RPC calls.
 | Value | Behavior |
 |---|---|
 | `False` (default) | Consumer admission is active. The `aster.consumer_admission` ALPN is registered. Consumers must run the admission handshake (present a signed credential) before they can connect on `aster/1`. |
-| `True` | No consumer gate. Anyone who knows the node address can call RPC methods directly. |
+| `True` | Open development admission. Peers can connect directly; method capability requirements still apply. |
 
 ### Producer admission (`allow_all_producers`)
 
-Controls whether other producers must be admitted before joining the mesh.
-
-| Value | Behavior |
-|---|---|
-| `True` (default) | No producer gate. Any node can join the producer mesh. |
-| `False` | Producer admission is active. The `aster.producer_admission` ALPN is registered. New producers must present valid enrollment credentials to join. |
+Producer admission is unsupported. Keep `allow_all_producers=True` or
+omit it; setting it to `False` raises `NotImplementedError`. It does not enable
+a second credential workflow.
 
 ### Gate 0: connection-level access control
 
-When any admission gate is active (`allow_all_consumers=False` or `allow_all_producers=False`), the node is built with `enable_hooks=True` and a `MeshEndpointHook` runs as a background task.
+Rust enforces the connection admission gate. The consumer-admission ALPN remains
+reachable so credentials can be presented. Successful admission adds the peer's
+endpoint ID to the allowlist; protected non-admission protocols reject unknown
+peers. Individual protocols and RPC methods can still apply further permissions.
 
-Gate 0 operates at the QUIC handshake layer -- it gates ALL protocols (blobs, docs, gossip, RPC, admission) for every connection. The logic is:
+## Protected producer example
 
-1. Admission ALPNs (`aster.consumer_admission`, `aster.producer_admission`) are always allowed -- credential presentation must be possible.
-2. After successful admission, the peer's endpoint ID is added to the allowlist.
-3. Subsequent connections from admitted peers on any ALPN are allowed.
-4. Connections from unknown peers on non-admission ALPNs are denied.
-
-This means that if a consumer passes the admission handshake, they can subsequently fetch blobs, sync docs, and use gossip -- all gated by the same credential they presented during admission.
-
-
-## Complete example
+This protected producer requires a provisioned `.aster-identity` with a
+`task-producer` entry and deployment trust root. For a local development
+program without provisioning, use the [quickstart](/docs/quickstart/python/).
 
 ```python
 import asyncio
@@ -286,17 +338,16 @@ class TaskRunnerService:
         return TaskResponse(status="completed", result=f"Processed {req.task_id}")
 
 async def main():
-    config = AsterConfig(
-        allow_all_consumers=False,   # require consumer admission
-        allow_all_producers=True,    # no producer mesh for now
-    )
+    config = AsterConfig.from_env()
 
     async with AsterServer(
         services=[TaskRunnerService()],
         config=config,
+        identity=".aster-identity",
+        peer="task-producer",
+        allow_all_consumers=False,
     ) as srv:
         print(f"TaskRunner v2 serving at {srv.address}")
-        print(f"Root pubkey: {srv.root_pubkey.hex()}")
         for s in srv.services:
             print(f"  {s.name} contract_id={s.contract_id}")
 
@@ -308,7 +359,6 @@ async def main():
 
 asyncio.run(main())
 ```
-
 
 ## Configuration via environment
 
@@ -326,7 +376,11 @@ ASTER_BIND_ADDR=0.0.0.0:9000
 ASTER_STORAGE_PATH=/var/lib/aster         # omit for in-memory
 ```
 
-When an `.aster-identity` file is present, you do not need to set `ASTER_SECRET_KEY`, `ASTER_ROOT_PUBKEY_FILE`, or `ASTER_ENROLLMENT_CREDENTIAL` -- those values come from the identity file.
+The config object resolves environment and TOML settings first. The server
+then merges the selected identity entry and applies explicit constructor
+overrides. An identity file can therefore supply the node key and trust root
+without separate environment variables. See [configuration](/docs/reference/configuration/)
+for the distinction between config resolution and wrapper overrides.
 
 You can also use a TOML file for network and storage settings:
 
@@ -345,18 +399,27 @@ path = "/var/lib/aster"
 
 ```python
 config = AsterConfig.from_file("aster.toml")
-async with AsterServer(services=[...], config=config, identity=".aster-identity", peer="billing-producer") as srv:
+async with AsterServer(services=[...], config=config, identity=".aster-identity", peer="billing-producer", allow_all_consumers=False) as srv:
     ...
 ```
 
-Use `config.print_config()` to dump the resolved configuration with provenance tracking (which value came from which source):
+Use `config.print_config()` to inspect the config object's values and their
+provenance. It does not report every later wrapper override; also inspect the
+identity selection and constructor arguments when diagnosing startup:
 
 ```
   [trust]
-    root_pubkey                 : a1b2c3d4...                        (.aster-identity)
+    root_pubkey                 : <not set>                          (default)
     allow_all_consumers         : False                              (default)
     allow_all_producers         : True                               (default)
   [network]
-    secret_key                  : ****...deadbeef                    (.aster-identity)
+    secret_key                  : <not set>                          (default)
     relay_mode                  : <default>                          (default)
 ```
+
+## Next steps
+
+- [Python client](/docs/bindings/python/client/)
+- [Trust model](/docs/concepts/trust-model/)
+- [Operations](/docs/guides/operations/)
+- [Observability](/docs/guides/observability/)

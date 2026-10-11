@@ -8,7 +8,9 @@
     "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "check:docs": "python3 scripts/check-docs.py",
+    "check:links": "python3 scripts/check-docs.py --external"
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.4",

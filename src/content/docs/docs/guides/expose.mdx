@@ -1,0 +1,83 @@
+---
+title: Expose an existing HTTP service
+description: Reach an HTTP origin through Aster peers or a public reverse-proxy edge.
+slug: docs/guides/expose
+---
+
+An **origin** is the HTTP service that handles the application request, such
+as a dashboard listening on a worker’s local port. `aster-expose` relays
+requests to that existing service over an Aster peer connection.
+Use it when a web application already speaks HTTP and you want to reach it
+across networks without turning it into a typed RPC service.
+
+## Before you start
+
+Have a working Rust node and an HTTP origin you can reach locally, such as a health endpoint returning a known response. Decide whether the caller is another Aster peer or a browser using a public edge. This page describes the integration and verification sequence; it does not provide a standalone origin/edge deployment.
+
+## Choose the deployment shape
+
+| Shape | Traffic path | Rust feature |
+| --- | --- | --- |
+| Peer access | Aster client → peer connection → exposed origin | `expose` |
+| Public browser access | Browser → HTTPS edge → peer connection → origin | `expose-edge` |
+
+Configure the [Cargo registry](/docs/bindings/rust/) and enable `expose` on
+the `aster` dependency. Enable `expose-edge` only on the process hosting the
+public edge. Origin-only applications do not need that edge dependency.
+
+The public edge uses [Salvo](https://salvo.rs/) for HTTP/1.1 and HTTP/2 TLS
+termination. Its interface does not provide HTTP/3, WebTransport, or full gRPC
+trailer support. [Aster's RPC HTTP transport](/docs/guides/http/) is a separate
+integration with different protocols and routing.
+
+## Register and authorize the origin
+
+Register an HTTP handler or a local socket under a service ID. Attach an
+authorization policy that evaluates the authenticated peer and any application
+credentials required for that service. Exposing a local port makes that
+service reachable to admitted peers, so scope the registration to the intended
+origin and callers.
+
+The relay can stream request and response bodies with backpressure. Avoid
+converting a streaming response into one large buffer unless the application's
+size limits make that appropriate. Propagate cancellation when either side
+stops consuming the exchange.
+
+In Rust HTTP handlers, `AuthenticatedPeer` in request extensions identifies
+the verified Aster peer. HTTP input cannot populate that extension. Treat a
+missing extension according to the handler's trust policy; a header carrying
+a peer ID is not equivalent evidence.
+
+## Operate a public edge
+
+The origin requests a route over a live connection to the edge. The edge's
+route policy decides whether to grant it. Keep that connection attached to
+the origin's relay machinery so incoming requests reach the registered service.
+
+Keep these policies separate:
+
+- Connection admission decides which Aster peers may connect.
+- Service authorization decides which peer may use an exposed origin.
+- Edge routing and HTTP middleware decide which route registrations and
+  browser requests are accepted.
+
+The browser's application identity must be checked by the HTTP application
+or edge policy. The authenticated Aster peer identifies the relay participant;
+it does not identify every browser user behind that peer.
+
+Reconnect and re-register routes after connection loss. Decide which host and
+origin headers your application accepts, and configure TLS for the public
+hostname. The edge is a running service with its own availability and
+operational requirements.
+
+## Verify peer access before adding an edge
+
+For an internal dashboard, first request the origin locally and record its status and body. Register that one origin under an application service ID, allow the intended peer, and request the same path through the peer relay. Expect the same application response. Repeat with an unauthorized peer and confirm rejection before it reaches the origin.
+
+Then, if browser access is required, configure edge TLS and route policy, register the origin route over its live edge connection, and request the public hostname. Stop that connection to verify the route stops serving the origin; reconnect and re-register before announcing readiness. A working edge listener alone does not prove the origin is reachable. Check origin credentials and host-header policy separately from peer admission.
+
+## Next steps
+
+- [Transport and relay paths](/docs/concepts/transport/)
+- [HTTPS and WebTransport RPC](/docs/guides/http/)
+- [Operations](/docs/guides/operations/)

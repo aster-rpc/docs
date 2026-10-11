@@ -1,0 +1,189 @@
+---
+title: Your first JVM service
+description: Build Java code generation and run unary and streaming RPC from a complete Maven project.
+slug: docs/quickstart/java
+---
+
+This project starts a Java server and client in one JVM. A first call returns
+one greeting; a second call streams three greetings. The peers use separate
+Iroh nodes, so both calls travel through the real network and dispatch path.
+
+The walkthrough was run on Apple Silicon macOS with JDK 25.0.2 and Maven 3.9.6.
+
+These examples use ephemeral identities, a loopback bind address, disabled
+relays, and open development admission. Use test data and configure
+[identity and authorization](/docs/concepts/trust-model/) before deployment.
+
+## Get and build the project
+
+Install JDK 25 and Maven. Download and extract
+[hello-jvm.zip](/examples/hello-jvm.zip), then enter `hello-jvm`:
+
+```sh
+mvn package dependency:build-classpath -Dmdep.outputFile=classpath.txt
+java --enable-native-access=ALL-UNNAMED -cp "target/classes:$(cat classpath.txt)" hello.Main
+```
+
+These shell commands target macOS/Linux. The project selects the
+`macos-aarch64` native classifier. Change that classifier for a different
+platform, and use the platform's Java classpath separator. Keep every
+`site.aster` dependency and native classifier on the same release.
+
+Expected output:
+
+```text
+Hello, Java!
+Hello, Java! (1)
+Hello, Java! (2)
+Hello, Java! (3)
+```
+
+## Understand the project
+
+| File or generated class | Job |
+| --- | --- |
+| `Echo.java` | Define request/response records and implement the unary `hello` method. |
+| `Echo$AsterDispatcher` (generated) | Connect the annotated unary method to the RPC runtime. |
+| `EchoDispatcher.java` | Reuse unary dispatch and explicitly implement streaming dispatch for `greet`. |
+| `Main.java` | Register wire types, start both peers, and make calls. |
+| `pom.xml` | Configure dependencies, annotation processing, and the native runtime. |
+
+For each call, the runtime selects a registered method dispatcher. The
+dispatcher decodes the request with the configured codec, invokes application
+behavior, and encodes the response. Type registration tells the codec which
+Java class corresponds to each wire type name.
+
+## Dependencies and generation
+
+The project's complete `pom.xml` is included in the download. It configures:
+
+- The public Aster Maven repository and pinned runtime/annotations packages.
+- The matching native classifier JAR, loaded from its classpath resource.
+- `aster-codegen-apt` as an annotation processor on JDK 25.
+- An optional Kotlin entry point, compiled after the generated Java classes.
+
+The Kotlin sample pins `2.4.0-Beta1`, matching the SDK's compiler setup. It is
+a preview compiler dependency. A Java-only application can remove the Kotlin
+plugin, dependency, and `src/main/kotlin` directory.
+
+The service in `src/main/java/hello/Echo.java` is:
+
+```java
+package hello;
+import site.aster.annotations.*;
+@Service(name = "Echo", version = 1)
+public final class Echo {
+    @WireType("hello/Request") public record Request(String name) {}
+    @WireType("hello/Response") public record Response(String message) {}
+    @Rpc public Response hello(Request request) {
+        return new Response("Hello, " + request.name() + "!");
+    }
+}
+```
+
+The processor emits `Echo$AsterDispatcher` and service-provider metadata.
+Generated streaming bodies are not implemented. The runtime does
+support streaming, so this example adds an explicit dispatcher:
+
+```java
+package hello;
+import java.util.Map;
+import site.aster.codec.Codec;
+import site.aster.interceptors.CallContext;
+import site.aster.server.spi.*;
+
+// Released generators emit unary bodies. Supply streaming dispatch explicitly.
+public final class EchoDispatcher implements ServiceDispatcher {
+    private final ServiceDispatcher unary = new Echo$AsterDispatcher();
+    public void registerTypes(org.apache.fory.Fory fory) { unary.registerTypes(fory); }
+    public ServiceDescriptor descriptor() { return unary.descriptor(); }
+    public Map<String, MethodDispatcher> methods() {
+        return Map.of("hello", unary.methods().get("hello"), "greet", new Greet());
+    }
+    public Map<String, Class<?>> requestClasses() {
+        return Map.of("hello", Echo.Request.class, "greet", Echo.Request.class);
+    }
+    public Map<String, Class<?>> responseClasses() {
+        return Map.of("hello", Echo.Response.class, "greet", Echo.Response.class);
+    }
+    private static final class Greet implements ServerStreamDispatcher {
+        public MethodDescriptor descriptor() {
+            return new MethodDescriptor("greet", StreamingKind.SERVER_STREAM,
+                RequestStyle.EXPLICIT, "hello/Request", java.util.List.of(),
+                "hello/Response", false, false);
+        }
+        public void invoke(Object impl, byte[] payload, Codec codec,
+                CallContext context, ResponseStream output) throws Exception {
+            var request = (Echo.Request) codec.decode(payload, Echo.Request.class);
+            for (int i = 1; i <= 3; i++) {
+                if (context.isCancelled() || context.isExpired()) return;
+                output.send(codec.encode(new Echo.Response("Hello, " + request.name() + "! (" + i + ")")));
+            }
+        }
+    }
+}
+```
+
+It combines the generated unary method with a manual streaming method and
+supplies request/response classes for both. `RequestStream.receive()` is the
+corresponding input API for client-stream and bidi dispatchers; null marks
+end-of-input. Encode outgoing application values through the configured codec.
+
+## Register types, serve, and call
+
+The main program explicitly registers wire types on the pooled codec before
+sharing it with its local server and client:
+
+```java
+package hello;
+import java.util.concurrent.TimeUnit;
+import site.aster.client.AsterClient;
+import site.aster.client.CallOptions;
+import site.aster.codec.ForyCodec;
+import site.aster.codec.ForyTags;
+import site.aster.config.AsterConfig;
+import site.aster.server.AsterServer;
+
+public final class Main {
+    public static void main(String[] args) throws Exception {
+        var config = AsterConfig.builder().relayMode("disabled")
+            .bindAddr("127.0.0.1:0").allowAllConsumers(true).build();
+        var codec = new ForyCodec();
+        ForyTags.register(codec.fory(), Echo.Request.class, "hello/Request");
+        ForyTags.register(codec.fory(), Echo.Response.class, "hello/Response");
+        try (var server = AsterServer.builder().config(config).codec(codec).service(new Echo(), new EchoDispatcher()).build().get(15, TimeUnit.SECONDS);
+             var client = AsterClient.builder().config(config).codec(codec)
+                 .consumerAdmission(false).build().get(15, TimeUnit.SECONDS)) {
+            var reply = client.call(server.node().nodeAddr(), "Echo", "hello",
+                new Echo.Request("Java"), Echo.Response.class,
+                CallOptions.DEFAULT.withTimeout(java.time.Duration.ofSeconds(5))).get(10, TimeUnit.SECONDS);
+            System.out.println(reply.message());
+            try (var stream = client.openServerStream(server.node().nodeAddr(), "Echo", "greet",
+                    new Echo.Request("Java"), Echo.Response.class,
+                    CallOptions.DEFAULT.withTimeout(java.time.Duration.ofSeconds(5))).get()) {
+                Echo.Response item;
+                while ((item = stream.recv()) != null) System.out.println(item.message());
+            }
+        }
+    }
+}
+```
+
+A separate producer and consumer each need their own registered codec. Pass a
+trusted `NodeAddr` to the consumer and keep the producer alive while it serves.
+The example disables the consumer handshake to demonstrate direct RPC against
+an open server. Protected deployments need the admission workflow or a
+pre-admitted peer, as described in the client guide.
+
+## Troubleshooting
+
+- “No dispatcher” means annotation processing or generated service-provider
+  resources are missing from the classpath; explicit registration avoids discovery.
+- An unknown Fory class indicates missing runtime registration or mismatched
+  wire names. An annotation does not register a type in every codec instance.
+- A native load failure needs the matching classifier JAR and native access enabled.
+- Fory may emit JDK Unsafe deprecation warnings. SLF4J reports a missing logging
+  provider until the application supplies one; neither warning is an RPC result.
+
+Continue with the [JVM server](/docs/bindings/java/server/),
+[JVM client](/docs/bindings/java/client/), and [Kotlin guide](/docs/bindings/java/kotlin/).

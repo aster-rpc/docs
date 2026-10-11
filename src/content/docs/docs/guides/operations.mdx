@@ -1,0 +1,100 @@
+---
+title: Operating a node
+description: Preserve identity and state, configure admission, observe health, and shut down cleanly.
+slug: docs/guides/operations
+---
+
+Move from an ephemeral example to an operated service by making identity,
+storage, access policy, and lifecycle explicit. This page covers those choices;
+the [configuration reference](/docs/reference/configuration/) lists the
+Python configuration surface and shared environment settings. Start from the [language guide](/docs/bindings/) for your binding; this checklist assumes you already own its server/node lifecycle.
+
+## Preserve identity and data separately
+
+A persistent endpoint key keeps the same peer identity across restarts.
+A persistent data directory keeps blobs and document state. Configure both
+when the application depends on both.
+
+For Rust `AsterServer`, `.identity(path)` loads or creates the endpoint secret
+key and `.persistent(directory)` selects durable node storage. The Rust
+identity file is a hex secret key. Python's high-level identity file includes
+credential material and is not interchangeable with that file.
+
+Keep secret keys, enrollment credentials, write tickets, and namespace secrets
+out of logs and source control. Back up the state needed to recover the same
+identity and application. Do not run two active processes from a copied node
+identity/data directory as a failover mechanism.
+
+## Configure admission and permissions
+
+Quickstarts use permissive settings. Decide which peers may connect and which
+methods each admitted principal may call. In Rust, enable hooks and run the
+admission loop if using Gate 0. Set its failure mode explicitly: the default
+hook fallback is fail-open, so a missing or stalled admission loop is not a
+deny policy.
+
+Populate authorization attributes only after verification. Keep the trusted
+root independently configured. Configure HTTP authentication separately from
+Iroh admission. See the [trust model](/docs/concepts/trust-model/).
+
+Resolve configuration in two layers. The configuration object reads its supported environment/TOML/default settings; a high-level wrapper can then apply explicit arguments and identity-file values. Inspect the final effective values for identity, storage, and policy instead of assuming an environment variable wins every layer.
+
+## Plan reachability
+
+Keep tickets and address hints current. Preserve relay access when it is part
+of your connectivity plan, and test the firewall and NAT conditions your users
+will encounter. A direct path observed on one network is not proof that every
+deployment can operate without a relay.
+
+Treat topology as observations for placement and routing, rather than a
+guarantee of independent sites. Use [coordination](/docs/guides/coordination/)
+and [fencing](/docs/guides/leases/) for exclusive state transitions.
+
+## Observe readiness
+
+Configure the shared [observability pipeline](/docs/guides/observability/)
+before services start when explicit exporters are needed. Separate process
+liveness, service readiness, peer reachability, and application data readiness.
+A listening socket does not prove that required documents have synced or that
+a coordination group has quorum.
+
+The health listener defaults to loopback. Restrict access if exposing it to a
+probe network; metrics are not an authenticated application API. Keep telemetry
+labels bounded and avoid secrets in trace baggage or metadata.
+
+## Shut down in ownership order
+
+1. Mark the application unavailable for new work.
+2. Stop accepting calls and drain the work your binding supports draining.
+3. Finish durable result handling and acknowledge completed coordination work.
+4. Close subscriptions, streams, clients, and owned listeners.
+5. Shut down the server/node and flush telemetry.
+
+Use the binding's explicit close or shutdown API. In Rust,
+`server.shutdown().await` shuts down the owned node; in Python, use the async
+context manager or close after draining. Dropping a process is not equivalent
+to successful store shutdown or durable telemetry delivery.
+
+For interrupted mutations, preserve the coordination journal and resume it.
+For data replication, wait for the required content after restart rather than
+assuming a previous sync request completed.
+
+## Validate an upgrade
+
+Pin and test the package/native-library pair, preserve application lockfiles,
+and compare contracts across the language combinations you deploy. Exercise
+restart, cancellation, denied access, lost connectivity, and shutdown with
+active streams. Check [release compatibility](/docs/reference/compatibility/)
+before adopting newer parity APIs.
+
+## Rehearse restart and recovery
+
+Use a disposable deployment before moving a worker that publishes catalog state into service. Record its endpoint ID, create one application record and retained blob, shut down through the binding API, then restart with the same identity and storage paths. Expect the endpoint ID and required persisted data to survive; in-memory handler fields will not. Recheck protected calls with both allowed and denied credentials after restart.
+
+Take a backup only with the storage engine's supported consistency procedure, or stop the node before copying its state. Restore into an isolated process while the original is stopped, confirm the identity and data, then restore connectivity. Keep the package/native pair and configuration with the backup record. This page is an operational checklist; it does not qualify a storage snapshot or automatic failover procedure for every binding.
+
+## Next steps
+
+- [Configuration](/docs/reference/configuration/)
+- [Observability](/docs/guides/observability/)
+- [Language and release compatibility](/docs/reference/compatibility/)

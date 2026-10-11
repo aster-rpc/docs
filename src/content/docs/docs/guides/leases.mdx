@@ -1,0 +1,149 @@
+---
+title: Fenced leases
+description: Protect a single-writer resource by checking ownership in its write path.
+slug: docs/guides/leases
+---
+
+Suppose a worker publishes your application's current catalog. If it loses its
+connection, another worker needs to take over. The original worker might still
+be running, with a write waiting to reach storage after its replacement starts.
+
+A **lease** gives a worker temporary ownership of a resource. A **fence** is the
+ownership token supplied with a protected write. The resource checks that token
+so it can reject a worker whose ownership has ended. In Aster, this protection
+requires your storage code to check the fence as part of the same operation
+that changes the data.
+
+## When to use a fenced lease
+
+Use a fenced lease when several workers can take over the same job, but only
+the current owner may change its output: a mutable catalog, a primary pointer,
+or another shared resource that cannot tolerate overlapping writers.
+
+The protected resource must support an atomic check and mutation, through a
+transaction, lock, or equivalent mechanism. A lease alone cannot protect an
+external write API that has no way to enforce ownership. For data that can
+converge after independent updates, consider
+[replicated documents](/docs/guides/data/) instead.
+
+## Follow a takeover
+
+An **epoch** is the generation of ownership recorded in the fence. A new
+ownership decision makes an earlier fence stale.
+
+| Event | Ownership and result |
+| --- | --- |
+| Worker A acquires the lease | A gets the current fence and can submit protected writes. |
+| A loses connectivity | A may still have work in flight; disconnection alone does not make those writes safe. |
+| Ownership changes and B acquires the lease | B gets a current fence; A's earlier fence is stale. |
+| A's delayed write reaches storage | Storage checks ownership inside the mutation and rejects A's stale fence. |
+| B submits a write | Storage accepts it if B's fence and authenticated identity still match current ownership. |
+
+Both parts are necessary: a grantor orders ownership changes, and the resource
+enforces those decisions. The worker's own belief that it holds a lease cannot
+replace the resource's check.
+
+## Connect the grant to enforcement
+
+| Piece | Responsibility |
+| --- | --- |
+| Serializer (the component that orders ownership changes) | Establish one ordering for grant, renew, release, and revoke |
+| Lease handle | Renew in the background and stop supplying a fence after loss |
+| Fence | Identify the resource, epoch, and holder |
+| Protected resource | Check the fence and authenticated writer atomically with the write |
+
+Rust exposes these under `aster::lease`. Foreign bindings wrap the same engine
+and expose callbacks for application serializers and fenced resources. For a
+replicated grantor, use [coordination](/docs/guides/coordination/).
+
+## Enforce at the write boundary
+
+Compare the fence with the current lease row under the same transaction or
+lock as the mutation. Reject an old epoch, the wrong authenticated holder,
+or a released/revoked row. Reading a snapshot and later applying a write
+leaves a race between the check and the mutation.
+
+`MemorySerializer::mutate_fenced` provides a co-located in-memory enforcement
+point. A remote database or storage API needs its own equivalent check.
+The in-memory serializer is not durable storage and should not be treated as
+a replicated grantor.
+
+Fetch the current fence immediately before each protected action. Do not
+cache it across unrelated waits or forward it to another node as permission
+to act on the holder's behalf.
+
+## In-memory enforcement fragment
+
+Use this fragment inside an async Rust application with an authenticated
+`node_id` string. The serializer and protected state live in the same process.
+A current fence permits the catalog mutation; releasing the lease invalidates
+that fence for later writes.
+
+```rust
+use std::sync::Arc;
+use aster::lease::{AcquireOutcome, LeaseHandle, LeaseOptions, MemorySerializer};
+
+let serializer = Arc::new(MemorySerializer::new());
+let mut catalog = String::new();
+match LeaseHandle::acquire(
+    serializer.clone(), "catalog/current", &node_id, LeaseOptions::default(),
+).await? {
+    AcquireOutcome::Granted(lease) => {
+        if let Some(fence) = lease.fence() {
+            serializer.mutate_fenced(&fence, &node_id, || {
+                catalog = "catalog-v1".to_owned();
+            })?;
+            assert_eq!(catalog, "catalog-v1");
+        }
+        lease.release().await?;
+    }
+    AcquireOutcome::Denied(reason, snapshot) => {
+        eprintln!("lease denied: {reason:?}; state: {snapshot:?}");
+    }
+}
+```
+
+A missing fence means the holder cannot authorize another action. The mutation also returns a rejection independently; handle both outcomes in application code. `node_id` must come from the authenticated writer boundary when the resource is remote.
+
+## Handle lease loss
+
+The holder renews while its connection and serializer remain available.
+If renewal fails beyond its conservative self-limit, `fence()` stops returning
+a token. Stop work and inspect the lease status. A resource can still reject
+an in-flight write, so handle fence rejection even while the holder believes
+its lease is current.
+
+Release explicitly when work finishes. Release advances the fence so old
+in-flight writes are rejected and another holder can acquire. Dropping a
+handle stops renewal; it does not substitute for a completed release.
+
+## Choose a grantor
+
+`aster.lease.Grantor` can serve a designated serialization point over RPC.
+It binds operations to the authenticated QUIC identity. Revocation
+requires the `operator` role; acquire, renew, release, and inspect have no
+method capability requirement unless you configure `.requires(...)`. Choose
+the grantor policy for your deployment as well as enforcing the fence at the
+resource. Authentication establishes who a peer is; authorization determines
+which operations that peer may perform.
+
+Losing that grantor
+prevents new grants and renewals until it is restored; automatic failover
+requires preserving the serialization order through consensus.
+
+Topology bridge selection and document records are useful placement hints,
+but cannot replace a fenced ownership decision. Withdrawing a policy record
+also does not invalidate a fence already in flight. Revoke at the serializer
+and enforce the advanced fence at the resource.
+
+## Check enforcement with a delayed write
+
+In a disposable test, acquire resource `catalog/current` as worker A and capture its fence. Apply a protected mutation through `MemorySerializer::mutate_fenced`, supplying A's authenticated identity. Release A, acquire as B, then submit A's saved fence again. Expect rejection before the mutation closure runs; B's current fence should succeed. Also try B's fence with A's identity and expect rejection.
+
+For an external store, implement the same ordering inside its transaction: load the current lease row, check resource/epoch/held state and authenticated holder, then update the catalog before committing. This is a verification scenario, not a standalone lease application; use the installed serializer and holder signatures when assembling it.
+
+## Next steps
+
+- [Replicated coordination](/docs/guides/coordination/)
+- [Sealed grants and revocation](/docs/guides/sealed-grants/)
+- [Trust model](/docs/concepts/trust-model/)

@@ -1,0 +1,151 @@
+---
+title: Java and Kotlin client
+description: Use JVM futures and stream owners for RPC, admission, sessions, deadlines, and cancellation.
+slug: docs/bindings/java/client
+---
+
+`site.aster.client.AsterClient` owns a node and pools peer connections. Calls
+return futures; streaming APIs also offer incremental owners. Start with the [JVM tutorial](/docs/quickstart/java/) for the
+payload classes, registered codec, and package setup. Build the client with
+registered payload types, select the admission path the server supports, then
+call the producer's address. Close stream owners before closing the client.
+
+Use futures for a command and result. Choose incremental stream owners when
+results are too large to buffer or arrive continuously. The `Events.watch`
+fragment below requires its own matching server contract.
+
+## Build and connect
+
+```java
+try (var client = AsterClient.builder().config(config).codec(codec)
+        .consumerAdmission(false).build().get(15, TimeUnit.SECONDS)) {
+    var reply = client.call(server.node().nodeAddr(), "Echo", "hello",
+        new Echo.Request("Java"), Echo.Response.class,
+        CallOptions.DEFAULT.withTimeout(Duration.ofSeconds(5))).get();
+    System.out.println(reply.message());
+}
+```
+
+This is a direct-RPC development fragment using the tutorial's open server.
+`NodeAddr` carries the peer identity and address hints. Calls establish/reuse
+a connection; `connect(target)` can establish it explicitly before the first
+call. Keep the client alive until futures and stream owners finish.
+
+Register payload types on the client's `ForyCodec` with `ForyTags.register`.
+Annotations and generated server dispatchers alone do not configure the
+client's runtime codec.
+
+## Admission configuration
+
+Consumer admission is enabled by default. The client performs
+`aster.consumer_admission` before dialing `aster/1`. Use `identity(path)` to
+load a consumer credential and stable node key; `identity(path, peerName)`
+selects an entry. `iidToken` supplies an optional cloud identity token.
+
+Set `consumerAdmission(false)` when the target serves direct RPC without that
+handshake, such as the native Rust tutorial. A protected direct-RPC server
+must already admit the peer. Disabling the handshake does not bypass a gate.
+
+| Builder setting | Purpose |
+| --- | --- |
+| `config` | Node and connection configuration |
+| `codec` | Payload registration and serialization |
+| `identity` | Identity file and consumer credential |
+| `secretKey` | Explicit stable 32-byte node seed |
+| `consumerAdmission` | Whether to perform the pre-RPC handshake |
+| `interceptors` | Client policy hooks |
+
+## Unary calls, deadlines, and metadata
+
+`call(target, service, method, request, responseClass, options)` returns a
+`CompletableFuture<Response>`. `CallOptions.DEFAULT` is immutable; its methods
+return modified copies:
+
+```java
+var options = CallOptions.DEFAULT
+    .withTimeout(Duration.ofSeconds(5))
+    .withMetadata("x-request-id", "example-1")
+    .withIdempotent(true);
+```
+
+The timeout is a relative RPC budget. `.get(timeout, unit)` and `.orTimeout`
+bound the Java future wait; they are not substitutes for setting the RPC
+budget. Cancel the invocation future when abandoning a live call. Treat
+cancellation as a request to stop work, not proof that the server rolled back
+an operation.
+
+## Server streaming
+
+`callServerStream` returns `CompletableFuture<List<Response>>`, buffering the
+whole result. Use `openServerStream` for large or long-running streams:
+
+```java
+try (var stream = client.openServerStream(target, "Events", "watch", request,
+        Response.class, options).get()) {
+    Response response;
+    while ((response = stream.recv()) != null) {
+        System.out.println(response);
+    }
+}
+```
+
+This fragment requires an `Events.watch` server-stream contract and a matching
+`Response` class. `recv()` returns null at clean completion and reports terminal
+failure. `recvWithTimeout` limits a receive wait. Closing or canceling the
+stream abandons unfinished work; always close the owner.
+
+## Client and bidirectional streaming
+
+`callClientStream` sends a finite list of requests and returns one response.
+`callBidiStream` returns a buffered response list. Use `openBidiStream` for
+interactive or unbounded exchanges; its `BidiCall` has `send`, `complete`,
+`recv`, `cancel`, and `close`.
+
+`complete()` half-closes request input. Keep receiving until `recv()` returns
+null, then close the owner. Send and receive concurrently when either side can
+produce enough data to encounter backpressure. An empty client stream is
+rejected by the native client.
+
+## Session-scoped calls
+
+`client.openSession(target)` returns a future of `ClientSession`, which
+allocates and attaches one connection-scoped session ID. Use its unary and
+streaming methods for calls that share state. `ClientSession.close()` is a
+no-op and does not release remote state; connection closure reaps it.
+
+Multiple sessions can share the client's connection. Do not move IDs between
+connections or reuse IDs from ended sessions.
+
+Session methods include `call`, `callServerStream`, `callClientStream`,
+`callBidiStream`, and `openBidiStream`. Keep the parent client alive for the
+session's lifetime. Do not rely on try-with-resources to reclaim a remote
+session independently.
+
+## Errors and policies
+
+A failed future usually surfaces through `ExecutionException` or
+`CompletionException`; inspect its cause for `site.aster.interceptors.RpcError`
+and read `code()`. Cancellation of a future can instead produce
+`CancellationException`. Connection/setup errors are distinct from application
+statuses. Avoid matching error-message text.
+
+Client interceptors can add retry and circuit-breaking policy. Unary and
+client-streaming calls use the policy execution path; response-streaming calls
+run hooks without transparent replay. Mark only genuinely idempotent calls
+retryable, within the original deadline budget.
+
+## Kotlin, tracing, and cleanup
+
+Kotlin calls these same Java methods. Use `use` for closeable resources and
+keep owners alive while awaiting futures. An application coroutine's
+cancellation must reach the invocation future or stream cancellation API;
+a timed-out coroutine alone must not leave an unowned native stream.
+See the [Kotlin guide](/docs/bindings/java/kotlin/) for a complete example.
+
+Rust records RPC metrics and traces and bridges logs to SLF4J. Configure the
+shared pipeline before creating clients when explicit settings are needed.
+Close stream/session owners first, then the client.
+
+Continue with the [JVM server](/docs/bindings/java/server/),
+[session model](/docs/concepts/session-scoped-services/), and
+[observability](/docs/guides/observability/).

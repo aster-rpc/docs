@@ -1,14 +1,50 @@
 ---
 title: API reference
-slug: "docs/reference/api"
+description: Find language entry points, generated references, and feature guides.
+slug: docs/reference/api
 ---
 
+Use this index when you know the operation you need and want its exact
+signature or ownership rules. If you are installing Aster or writing a first
+service, begin with the [language guides](/docs/bindings/).
 
-Generated references describe the Python and TypeScript public APIs. Check the reference version against the package you are using.
+The generated Python and TypeScript catalogs cover curated public modules.
+Their [generation record](/api/version.json) identifies the package inputs.
+Compare that record with your installed package before using a signature.
 
-- **Python** — <a href="/api/python/aster/public.html" target="_blank" rel="noopener">aster-rpc on pdoc &rarr;</a>
-- **TypeScript** — <a href="/api/typescript/" target="_blank" rel="noopener">@aster-rpc/aster on TypeDoc &rarr;</a>
+| Language | Guide | Detailed reference |
+| --- | --- | --- |
+| Rust | [Rust](/docs/bindings/rust/) | Build dependency rustdoc with `cargo doc --open` in the configured consumer project, then select `aster` |
+| Python | [Python](/docs/bindings/python/) | [Generated API](/api/python/aster/public.html) |
+| TypeScript | [TypeScript](/docs/bindings/typescript/) | [Generated API](/api/typescript/) |
+| Go | [Go](/docs/bindings/go/) | [Client](/docs/bindings/go/client/) and [server](/docs/bindings/go/server/); local `go doc` for the installed module |
+| Java and Kotlin | [JVM](/docs/bindings/java/) | [Client](/docs/bindings/java/client/) and [server](/docs/bindings/java/server/); IDE signatures from matching Maven artifacts |
+| .NET | [.NET](/docs/bindings/dotnet/) | [Client](/docs/bindings/dotnet/client/) and [server](/docs/bindings/dotnet/server/); package XML documentation |
 
-Both references are generated from a single curated module per language (`aster.public` for Python, `src/public.ts` for TypeScript) so the surface stays focused and aligned across bindings.
+There are no hosted Go, JVM, or .NET signature catalogs linked here. The
+manual references explain usage; local package documentation and IDE inspection
+provide the signatures for the artifacts you actually installed.
 
-See [language support](/docs/overview/what-is-aster/#language-support) for the other preview surfaces and [configuration](/docs/reference/configuration/) for runtime settings.
+Rustdoc reflects the features enabled in the consumer's dependency. Enable the
+features you intend to use before generating it. Native dependencies must be
+available for Cargo to resolve the project.
+
+## Server and client references
+
+All languages have dedicated references for lifecycle, patterns, sessions,
+admission, deadlines, errors, and cleanup. Start from the
+[language guide index](/docs/bindings/) to choose the server or client path.
+The [JVM tutorial](/docs/quickstart/java/) includes explicit streaming dispatch
+for the released generator's streaming limitation.
+
+## Feature guides
+
+- [Typed services](/docs/guides/services/) and [contract identity](/docs/concepts/contract-identity/)
+- [Blobs, documents, and gossip](/docs/guides/data/)
+- [Coordination](/docs/guides/coordination/) and [leases](/docs/guides/leases/)
+- [Topology](/docs/guides/topology/) and [sealed grants](/docs/guides/sealed-grants/)
+- [HTTP RPC](/docs/guides/http/) and [HTTP exposure](/docs/guides/expose/)
+- [Configuration](/docs/reference/configuration/) and [observability](/docs/guides/observability/)
+
+See [release compatibility](/docs/reference/compatibility/) for the distinction
+between shared behavior, language coverage, and package availability.

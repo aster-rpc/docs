@@ -1,42 +1,78 @@
 ---
-title: Aster documentation
-description: Build peer-to-peer applications with typed services, cryptographic identities, and scoped access.
+title: Build with Aster
+slug: docs
+description: Typed peer-to-peer services, replicated data, and coordinated state through one Rust engine.
 tableOfContents: false
 ---
 
-import { LinkCard } from '@astrojs/starlight/components';
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import SdkLayers from '@components/SdkLayers.astro';
 
-Aster is a peer-to-peer application SDK. Define a typed service,
-connect to a peer by its cryptographic identity, and control which calls it may
-make. Use the SDK to connect services across developer machines, customer
-networks, and cloud instances.
+Aster is a peer-to-peer application SDK for services that run across developer
+machines, customer networks, and cloud instances. It combines typed RPC,
+content-addressed storage, replicated documents, and coordination through a
+shared Rust engine, with APIs for Rust, Python, TypeScript, Go, Java, and .NET.
 
-Aster 0.3.893 is a public preview. It provides Rust, Python, TypeScript, Go, Java, and .NET APIs against the shared Rust engine. See [what is Aster?](/docs/overview/what-is-aster/) for language status and [why Aster?](/docs/overview/why-aster/) for the deployment requirements it addresses.
+## Why use it?
 
-## Try the preview
+A service on a changing network needs a stable identity and a way for callers
+to reach it. A distributed application also needs to decide who may act,
+which data can converge later, and which mutations must have one agreed order.
+Aster provides separate tools for those decisions:
 
-Create a service and call it from a second process. The quickstart includes
-Python and TypeScript examples. These guides have not yet been validated word for word on a clean host for
-0.3.893. Package versions on PyPI and npm may differ from the Forgejo preview.
+- [Peer connectivity](/docs/concepts/transport/) uses endpoint public keys,
+  direct-path attempts, and relay fallback.
+- [Typed services](/docs/concepts/contract-identity/) identify their contracts
+  across languages; [method permissions](/docs/concepts/trust-model/) restrict calls.
+- [Blobs and documents](/docs/guides/data/) transfer content and replicate references.
+- [Coordination and leases](/docs/guides/coordination/) serialize critical state,
+  with fences that the protected resource must enforce.
 
-<LinkCard title="Your first service" description="Install Aster, start a producer, and make a call." href="/docs/quickstart/python/" />
-<LinkCard title="Build MissionControl" description="Agent check-ins, logs, metrics, sessions, and operator access." href="/docs/quickstart/mission-control/" />
+Aster is a public preview. Packages, language APIs, and feature
+coverage have different boundaries. Read [release compatibility](/docs/reference/compatibility/)
+when choosing a language or moving from current source to a released package.
 
-## Understand the connection
+## How it fits together
 
-Peer identity, network connectivity, and permission are separate parts of an
-application. Learn how they fit together before configuring a trusted deployment.
+<SdkLayers />
 
-- [Peer connections](/docs/concepts/transport/) — identities, direct paths, and relay fallback.
-- [Trust model](/docs/concepts/trust-model/) — admission, credentials, and method permissions.
-- [Contract identity](/docs/concepts/contract-identity/) — how service interfaces are identified.
+The shared engine handles transport and RPC dispatch. Application handlers run
+in the language you choose. [Iroh](https://iroh.computer/) provides peer
+connectivity and data protocols; [Apache Fory](https://fory.apache.org/)
+provides the cross-language payload format. Read the
+[architecture](/docs/reference/architecture/) and [trust model](/docs/concepts/trust-model/)
+for the boundaries between connectivity, data, and authorization.
 
-## Find the API and settings
+## Find your starting point
 
-- [Python guide](/docs/bindings/python/) — installation and the language surface.
-- [Configuration](/docs/reference/configuration/) — settings, defaults, and environment variables.
-- [Python API](/api/python/aster/public.html) and [TypeScript API](/api/typescript/) — generated reference.
+<CardGrid>
+  <LinkCard title="Evaluate Aster" description="Follow a remote-worker application and decide whether the network and state model fits." href="/docs/overview/what-is-aster/" />
+  <LinkCard title="Build a service" description="Choose a language and its installation, code generation, and ownership workflow." href="/docs/bindings/" />
+  <LinkCard title="Review security" description="Trace endpoint authentication, admission, method requirements, and resource authority." href="/docs/concepts/trust-model/" />
+  <LinkCard title="Operate a deployment" description="Plan persistent identity, access policy, health checks, and recovery." href="/docs/guides/operations/" />
+</CardGrid>
 
-The SDK is built on [Iroh](https://iroh.computer/) for peer connectivity and
-[Apache Fory](https://fory.apache.org/) for serialization. The
-[Aster website](https://aster.site/) introduces the project and its examples.
+## Try a service
+
+<CardGrid>
+  <LinkCard title="Start with Rust" description="Build a complete service and make a call over a peer connection." href="/docs/quickstart/rust/" />
+  <LinkCard title="Start with Python or TypeScript" description="Define a producer, connect a consumer, and make your first call." href="/docs/quickstart/python/" />
+</CardGrid>
+
+Choose your language:
+[Rust](/docs/bindings/rust/) · [Python](/docs/bindings/python/) ·
+[TypeScript](/docs/bindings/typescript/) · [Go](/docs/bindings/go/) ·
+[Java and Kotlin](/docs/bindings/java/) · [.NET](/docs/bindings/dotnet/).
+
+## Build and operate an application
+
+<CardGrid>
+  <LinkCard title="Store and replicate data" description="Choose blobs, documents, or gossip for the state you need to move." href="/docs/guides/data/" />
+  <LinkCard title="Coordinate writers" description="Use durable coordination clients and enforce ownership with fences." href="/docs/guides/coordination/" />
+  <LinkCard title="Connect HTTP clients" description="Serve typed RPC over HTTPS and WebTransport, or expose an existing origin." href="/docs/guides/http/" />
+  <LinkCard title="Operate a node" description="Preserve identity and state, configure access, observe health, and shut down." href="/docs/guides/operations/" />
+</CardGrid>
+
+For a larger example, work through [MissionControl](/docs/quickstart/mission-control/).
+For signatures and settings, use the [API index](/docs/reference/api/) and
+[configuration reference](/docs/reference/configuration/).

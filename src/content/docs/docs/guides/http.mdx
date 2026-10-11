@@ -1,0 +1,90 @@
+---
+title: HTTPS and WebTransport RPC
+description: Serve typed Aster services through the Salvo transport and understand its authentication boundary.
+slug: docs/guides/http
+---
+
+`aster-transport-salvo` serves Aster RPC services over HTTPS and WebTransport
+using the same dispatcher as Iroh. Use it for browser or HTTP clients that
+cannot connect through a native Iroh endpoint. To proxy an existing web
+application instead, use [HTTP exposure](/docs/guides/expose/).
+
+HTTPS carries requests through an HTTP listener. WebTransport establishes an
+HTTP/3 session with streams that can carry traffic in both directions. They
+provide alternative ways to reach the same application handlers, while using
+an HTTP authentication policy instead of Iroh peer authentication.
+
+## Before you start
+
+Run the [Rust first service](/docs/quickstart/rust/) first. You need its payload registrations and service dispatcher, a listener address, credentials for your application authenticator, and TLS material trusted by the intended client. The snippets below declare dependencies; listener/authenticator/client assembly remains application-specific and is not a complete executable HTTPS or browser walkthrough.
+
+## Add the Rust transport
+
+Configure the [Aster Cargo registry](/docs/bindings/rust/), then add:
+
+```toml
+aster = { version = "=0.3.893", registry = "aster", features = ["rpc"] }
+aster-transport-salvo = { version = "=0.3.893", registry = "aster" }
+```
+
+Keep the payload dependencies from the [Rust quickstart](/docs/quickstart/rust/).
+The transport reexports its [Salvo](https://salvo.rs/) dependency. Applications
+using Salvo proc macros need a direct `salvo = { version = "=1.0.3", registry = "aster" }`
+dependency so the macro and transport use the same crate identity.
+
+## Choose a protocol
+
+| Protocol | Request format | Boundary |
+| --- | --- | --- |
+| Canonical HTTPS RPC | `POST /aster/<Service>/<method>` with `application/aster-frames` | Aster envelopes and Fory payloads; HTTP request bodies are buffered before dispatch |
+| Browser JSON projection | Opt-in JSON request/response and NDJSON server stream | Service must register projection support; not a replacement for XLANG interoperability |
+| WebTransport | Aster RPC streams over the HTTP/3 session | Live bidirectional streams; requires compatible client and TLS configuration |
+
+The Rust `HttpConfig` implements the transport accepted by
+`AsterServer::builder().with_http(...)`. Register the service once and attach
+the HTTP configuration to serve it alongside Iroh. HTTP is off unless you
+configure it.
+
+## Authenticate HTTP calls
+
+An Iroh connection authenticates an endpoint public key. An HTTP connection
+does not provide that identity. Configure an application authenticator that
+verifies credentials and produces a stable principal and authorized attributes.
+The dispatcher then evaluates method capability requirements against those
+attributes.
+
+Do not treat an incoming address, caller-supplied peer string, or metadata field
+as authenticated identity. TLS authenticates the listener according to the
+client's certificate policy; it does not enroll the caller into an Aster
+deployment. WebTransport session establishment also does not substitute for
+per-call authorization.
+
+## Configure TLS and ownership
+
+Use a certificate and private key appropriate to the hostname and client trust
+policy. Browser-pinned development WebTransport certificates have additional
+requirements; the transport provides certificate helpers for that purpose.
+Keep development certificate pinning distinct from a publicly trusted TLS setup.
+
+A public CA certificate does not automatically carry an Aster node identity.
+Where supported, Aster's generated certificates can bind to a node key; clients
+must verify that binding explicitly.
+
+Own listener startup and shutdown in the application. Confirm sockets have
+bound before announcing readiness, stop admitting work during shutdown, and
+release listener owners before their dispatcher/runtime. HTTP sessions still
+need lifecycle handling after disconnects or application failures.
+
+Foreign-language listener, authenticator, and certificate APIs have different configuration surfaces. Confirm the installed package/native pair exposes each API before translating a Rust integration. See [compatibility](/docs/reference/compatibility/).
+
+## Verify each transport independently
+
+For a browser calling a catalog lookup, first serve the same handler over Iroh to establish its expected response. Attach the HTTP listener and authenticator, wait for its socket to bind, then send a correctly encoded request with an authorized credential. Expect the same typed result. An ordinary JSON POST only works when the service explicitly registers JSON projection.
+
+Repeat with a missing or invalid credential and check that the handler is not invoked. Next test an authorized principal lacking the method capability. For WebTransport, verify TLS trust and session establishment separately, then test a live stream and client disconnect. Certificate rejection happens before an RPC result; a method denial happens at dispatch. Preserve those distinctions in client diagnostics and readiness checks.
+
+## Next steps
+
+- [Trust model](/docs/concepts/trust-model/)
+- [Serialization](/docs/concepts/serialization/)
+- [Expose an existing HTTP service](/docs/guides/expose/)

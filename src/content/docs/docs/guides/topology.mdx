@@ -1,0 +1,79 @@
+---
+title: Topology and placement
+description: Use peer measurements to choose nearby providers and assess placement candidates.
+slug: docs/guides/topology
+---
+
+Topology describes observed proximity and path quality between peers. Use it
+to choose blob providers, organize replication, or supply placement candidates.
+It does not grant exclusive ownership or prove physical failure independence.
+
+## Before you start
+
+Start a Rust node and make connections to the actual provider candidates. Monitoring cannot infer a path it has never observed. The fragment below enables collection on an existing application; choose providers only after you have data and a fallback for unknown peers.
+
+## Read local observations
+
+Enable monitoring when starting a Rust node:
+
+```rust
+use aster::{AsterConfig, Node};
+
+let config = AsterConfig::builder().monitoring(true).build();
+let node = Node::start(config).await?;
+for peer in node.topology().peers() {
+    println!("{}: {:?}, RTT {:?} µs", peer.node_id, peer.level, peer.rtt_us);
+}
+```
+
+The local view is fed by connections the node makes. A peer with no observation
+is unknown; absence does not mean it is far away or unavailable.
+
+| Output | Use |
+| --- | --- |
+| Locality level | Select same-host, LAN, site, region, or more distant candidates |
+| Path quality | Choose among candidates using current RTT, jitter, loss, and throughput estimates |
+| Confidence | Account for limited or stale measurements |
+
+Keep location and path health separate. Congestion can make a nearby peer a
+poor current provider without changing its locality.
+
+## Share topology
+
+Shared topology uses a document namespace in which participants publish
+measurements. Distribute its capability through [sealed grants](/docs/guides/sealed-grants/)
+and restrict participation to the producers that your policy admits.
+Possession of a shared namespace secret requires its own access policy.
+
+Nodes derive clusters and bridge candidates from shared observations. Equal
+input yields equal results; eventual propagation means two nodes can temporarily
+derive different views. A bridge selection is therefore unsuitable as a
+single-writer lock.
+
+Use one `snapshot()` for a placement decision that makes several related
+queries. It holds an immutable observation so `clusters()` and `separated()`
+are evaluated against the same view. Independent live queries can observe
+different updates. Treat an unknown separation verdict as unknown.
+
+## Expose a remote view deliberately
+
+The baseline `aster.net.Topology` RPC service is disabled by default. In Rust,
+enable `.builtin_topology(true)` and set `.topology_requires(...)` on the
+server builder. Monitoring must also be enabled. Restrict access because
+topology reveals information about the deployment's network layout.
+
+The remote payload omits socket addresses that are present in local
+observations. Check the installed binding's API for its configuration and
+snapshot surface and matching native-library requirements.
+
+## Make a conservative placement choice
+
+Suppose a catalog has three providers. In one snapshot, A is observed on the LAN with a healthy path, B has a more distant path, and C has no observation. These are illustrative observations, not measured output. Prefer A for the current download if its content and access policy are suitable. Keep B as a fallback and leave C unranked until measured.
+
+For placing two replicas, query their separation from the same snapshot and require the confidence your policy needs. An unknown verdict must not become evidence of independent sites. Reevaluate after network changes, and use authoritative deployment labels or an operator policy when physical failure independence is a requirement.
+
+## Next steps
+
+- [Baseline services](/docs/guides/baseline-services/)
+- [Coordination](/docs/guides/coordination/)
+- [Fenced leases](/docs/guides/leases/)

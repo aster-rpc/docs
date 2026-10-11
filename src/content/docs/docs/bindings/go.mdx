@@ -1,0 +1,68 @@
+---
+title: Go
+description: The Go API, native runtime requirements, and public module status.
+slug: docs/bindings/go
+---
+
+The Go binding uses CGO to call Aster's Rust engine through the C ABI. It
+provides typed RPC, streaming, data protocols, coordination clients, and
+language-level lifecycle and telemetry helpers. Use it to add peer RPC to a Go
+service while retaining context cancellation and ordinary goroutine handlers.
+
+Start with the [pinned-source Go project](/docs/quickstart/go/). It assembles
+the module replacement, CGO headers, and native library together; the reference
+below explains what each part contributes.
+
+## Installation status
+
+Use Go 1.25 or newer and a C toolchain for CGO. The module path is
+`sdk.getaster.now/go`, but public module installation is not yet qualified for
+this preview. A module path by itself is not a working installation command.
+The [public source repository](https://github.com/aster-rpc/aster-rpc)
+contains `bindings/go`; source builds also need the matching native library.
+
+Use a native library from the same SDK release and target architecture. Its
+platform name is `libaster_transport_ffi.so`, `libaster_transport_ffi.dylib`, or
+`aster_transport_ffi.dll`. Follow the loader configuration supplied with that
+binding revision. Current source can require a newer ABI than released binaries.
+
+## Define interoperable payloads
+
+Types implement `WireTyped` with a stable wire name. Binary fields need a Fory
+tag; otherwise Go represents a byte slice as a list of integers:
+
+```go
+type Chunk struct {
+    Data []byte `fory:"type=bytes"`
+}
+
+func (Chunk) AsterWireType() string { return "files/Chunk" }
+```
+
+Use matching wire names, fields, defaults, and method settings in every language.
+The binding delegates canonical contract encoding and hashing to Rust.
+
+## Runtime conventions
+
+| Area | Go convention |
+| --- | --- |
+| Calls | Pass `context.Context` for deadlines and cancellation |
+| Servers and clients | `StartServer` and `StartClient`; close owned resources |
+| Payloads | Fory XLANG, compatible mode, reference tracking disabled |
+| Logs | Rust events bridge to `log/slog` |
+| Metrics and traces | Shared Rust observability pipeline |
+| Coordination | Durable client results require explicit acknowledgement |
+
+Treat cancellation according to the operation's contract. Canceling a wait
+does not prove that a mutation had no effect. In particular, recover an
+unresolved coordination mutation through its durable client journal.
+
+## Next steps
+
+- [First service](/docs/quickstart/go/)
+- [Go server](/docs/bindings/go/server/)
+- [Go client](/docs/bindings/go/client/)
+
+- [Language and release compatibility](/docs/reference/compatibility/)
+- [Cross-language contracts](/docs/concepts/contract-identity/)
+- [Coordination](/docs/guides/coordination/)

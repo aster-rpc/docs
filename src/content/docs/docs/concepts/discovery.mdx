@@ -1,20 +1,48 @@
 ---
 title: Discovery and registry
 slug: "docs/concepts/discovery"
+description: "Choose explicit addresses or a replicated registry, then understand bootstrap, contracts, and endpoint leases."
 ---
 
 
 Aster includes a peer-replicated service registry built on [Iroh](https://iroh.computer/) documents, blobs, and gossip. Participating peers synchronize registry state and use its endpoint leases to locate services.
 
-## Three iroh primitives
+## Choose an address or a registry
+
+A remote worker can send its address directly to an operator. When many workers
+advertise the same contract, a shared registry helps the operator select a
+provider without keeping an application-maintained address list.
+
+| Connection approach | Prerequisites | Useful when |
+| --- | --- | --- |
+| Explicit endpoint address | Expected endpoint identity and usable address hints or discovery | You already know the provider, including a first-service tutorial |
+| Shared registry | Namespace access, reachable synchronization peers, published contract and endpoint records | You need to find providers by contract or rollout channel |
+
+A contract ID identifies an interface; it does not tell a new peer which
+registry to join. Obtain the registry namespace's read or write capability
+through your deployment's trusted bootstrap path and synchronize with its
+participants. Writers also need an author identity and the registry's write
+permission. Knowing a namespace ID alone does not grant write access.
+
+The Python high-level server publishes contract metadata for connected clients;
+its consumer workflow can obtain the registry namespace during admission and
+synchronize from that producer. That metadata path and a deployment-wide
+provider registry have different setup requirements. The key layout below is
+reference material, rather than a complete registry deployment procedure.
+
+Before using registry resolution, understand [contract identity](/docs/concepts/contract-identity/)
+and the [data capability model](/docs/guides/data/). Use
+[dial a service](/docs/guides/dial-a-service/) for an explicit-address connection.
+
+## Data protocols
 
 The registry is built on three independent iroh subsystems, each suited to a different data pattern:
 
 **iroh-docs** -- replicated key-value store for mutable state. iroh-docs provides a CRDT-based document model where multiple authors can write entries concurrently. Entries are signed by their author's keypair, providing cryptographic proof of authorship. The registry uses iroh-docs for endpoint leases, service aliases, channel pointers, access control lists, and configuration.
 
-**iroh-blobs** -- content-addressed storage for immutable artifacts. iroh-blobs stores data identified by its BLAKE3 hash. Data is transferred directly between peers, verified on receipt, and cacheable indefinitely (the hash guarantees integrity). The registry uses iroh-blobs for contract bundles -- the immutable collections containing canonical service definitions and type definitions.
+**iroh-blobs** -- content-addressed storage for immutable artifacts. iroh-blobs stores data identified by its BLAKE3 hash. Data is transferred directly between peers, verified on receipt, and cacheable while retained (the hash verifies content integrity). The registry uses iroh-blobs for contract bundles -- the immutable collections containing canonical service definitions and type definitions.
 
-**iroh-gossip** -- pub-sub for real-time notifications. iroh-gossip provides topic-based message broadcast across the mesh. The registry uses gossip for real-time events: `CONTRACT_PUBLISHED` when a new contract is available, `LeaseUpdate` when an endpoint comes online or goes offline, and other operational notifications.
+**iroh-gossip** -- pub-sub for real-time notifications. iroh-gossip provides topic-based message broadcast across the mesh. The registry uses gossip for real-time events: `CONTRACT_PUBLISHED` when a new contract is available, `ENDPOINT_LEASE_UPSERTED` and `ENDPOINT_DOWN` for endpoint changes, and other operational notifications.
 
 ## Registry namespace structure
 
@@ -62,7 +90,7 @@ The registry organizes data in an iroh-docs namespace with the following key str
       {other_contract_id}  -- compatibility report
 ```
 
-All entries are signed by their author's keypair. The `AuthorId` on each entry provides cryptographic proof of who wrote it.
+All entries are signed by their author's keypair. The `AuthorId` proves authorship; registry authorization must separately decide which authors may publish trusted records.
 
 ## ArtifactRef: linking docs to blobs
 
@@ -72,6 +100,7 @@ The registry separates mutable pointers (in iroh-docs) from immutable data (in i
 ArtifactRef {
     contract_id          -- BLAKE3 hash of the ServiceContract
     collection_hash      -- BLAKE3 root hash of the iroh blob collection
+    collection_format    -- raw (single blob) or index (multi-file collection)
     provider_endpoint_id -- optional: endpoint serving the blobs
     relay_url            -- optional: relay for the provider
     ticket               -- optional: bearer blob ticket for direct fetch
@@ -86,9 +115,11 @@ This indirection keeps the docs layer lightweight. Docs entries are small pointe
 
 An endpoint that serves a particular contract advertises itself by writing an `EndpointLease` to the registry. Leases are time-bounded: they have a duration (default 45 seconds) and must be refreshed periodically (default every 15 seconds).
 
-If an endpoint stops refreshing its lease -- because it crashed, lost connectivity, or shut down -- the lease expires and consumers stop routing to it. There is no heartbeat protocol; the lease mechanism in iroh-docs is the health signal.
+Consumers filter stale leases when resolving a service. These records are discovery hints: replication delay, clock differences, and a failure after lookup can still leave a chosen endpoint unreachable. They do not replace a connection attempt or an application health check.
 
-Leases carry the endpoint's `NodeAddr` (public key, relay URL, direct addresses), so consumers have everything they need to establish a connection without additional discovery steps.
+Registry endpoint leases are advertisements, distinct from [fenced ownership leases](/docs/guides/leases/). A registry entry cannot grant exclusive write authority.
+
+Leases carry an endpoint identity, optional relay URL, and direct-address hints. Consumers use those to attempt a connection; missing or stale hints can still require configured discovery or cause the attempt to fail.
 
 ## Service resolution
 
@@ -99,7 +130,7 @@ The flow from "I need this service" to "I have a connection" is:
 3. The entry contains an `ArtifactRef` with a `collection_hash`.
 4. The consumer fetches the blob collection (if not already cached) and verifies `blake3(contract.bin) == contract_id`.
 5. The consumer looks up `services/{name}/contracts/{contract_id}/endpoints/` for active leases.
-6. The consumer selects an endpoint and dials it using the `NodeAddr` from the lease.
+6. The consumer selects an endpoint and dials it using the identity and address hints from the lease.
 
 Registry lookup uses document sync, artifact fetch uses blob transfer, and calls use the RPC protocol. Peers still need a way to join the namespace and reach its participants.
 
@@ -107,7 +138,7 @@ Registry lookup uses document sync, artifact fetch uses blob transfer, and calls
 
 Services can organize their contracts into channels and versions:
 
-- **Versions** (`v1`, `v2`, ...) map to specific `contract_id` values. A version is immutable once published.
+- **Versions** (`v1`, `v2`, ...) map to specific `contract_id` values. Publishers treat version pointers as append-only by convention; the document write itself does not enforce immutability.
 - **Channels** (`stable`, `canary`, `dev`) are mutable pointers to a `contract_id`. Promoting a canary to stable is a single docs write that updates the `stable` channel pointer.
 - **Tags** are arbitrary labels that point to a `contract_id`, useful for custom workflows.
 
@@ -120,8 +151,8 @@ Changes to the registry are broadcast via iroh-gossip so that participants learn
 Key gossip events:
 
 - **CONTRACT_PUBLISHED** -- a new contract has been published; consumers can fetch it.
-- **LeaseUpdate** -- an endpoint has come online, gone offline, or updated its metadata.
-- **ChannelUpdate** -- a channel pointer has changed (e.g., a new version promoted to stable).
+- **ENDPOINT_LEASE_UPSERTED / ENDPOINT_DOWN** -- an endpoint advertisement changed or a provider reported itself down.
+- **CHANNEL_UPDATED** -- a channel pointer has changed (e.g., a new version promoted to stable).
 
 Gossip notifications prompt participants to refresh document state. After a missed notification, a later successful document sync can provide the update.
 

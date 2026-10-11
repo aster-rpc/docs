@@ -1,6 +1,7 @@
 ---
 title: Session-scoped services
 slug: "docs/concepts/session-scoped-services"
+description: "Understand session isolation, concurrent calls, and cleanup across connections and transports."
 ---
 
 A session-scoped service retains an instance across multiple RPC calls. This supports workflows such as accumulating task state or tracking a sequence of operations for one client session.
@@ -13,6 +14,22 @@ Over Iroh, the server identifies a session by its connection, non-zero session I
 
 Clients allocate session IDs from a connection-wide counter. A closed ID cannot be reopened on that connection. Shared services require session ID zero; session-scoped services require a non-zero ID.
 
+## Two sessions on one connection
+
+Suppose a worker opens two task sessions on one connection to `TaskRunner`.
+Calls on session 7 reuse one instance; calls on session 8 reuse another.
+
+| Call | Instance used | State consequence |
+| --- | --- | --- |
+| Connection A, session 7, `TaskRunner.add` | A / 7 / TaskRunner | Adds to the first task's state |
+| Connection A, session 8, `TaskRunner.add` | A / 8 / TaskRunner | Adds to independent state |
+| Connection A, session 7, `TaskRunner.status` | A / 7 / TaskRunner | Reads the first task's state |
+| Connection B, session 7, `TaskRunner.status` | B / 7 / TaskRunner | Uses another instance despite the same numeric ID |
+
+Two concurrent calls on session 7 still share its instance. A session provides
+identity and lifetime, rather than automatic serialization of application
+mutations. Use locks, actors, or the binding's concurrency tools where needed.
+
 ## Lifetime and limits
 
 The server creates an instance when the session is first used. Closing the connection releases its sessions. Applications must persist or reconstruct state if they need recovery after disconnection.
@@ -20,6 +37,19 @@ The server creates an instance when the session is first used. Closing the conne
 The Rust dispatcher defaults to a maximum of 1024 active sessions per connection. Opening another session at the configured limit returns `RESOURCE_EXHAUSTED`. Application resource limits can impose additional constraints.
 
 Separate calls can use separate streams within a session. Do not assume that session state is accessed sequentially; coordinate mutable state according to the binding and handler concurrency model.
+
+## Closing a session
+
+Use your binding's session owner and connection cleanup APIs. Remote session
+release and application cleanup callbacks have binding-specific behavior;
+closing a local wrapper is not universally a remote close operation. In
+particular, JVM `ClientSession.close()` is a no-op, so close the peer connection
+to reclaim its remote sessions.
+
+Follow the client reference for [Rust](/docs/bindings/rust/client/),
+[Python](/docs/bindings/python/client/),
+[TypeScript](/docs/bindings/typescript/client/), [Go](/docs/bindings/go/client/),
+[JVM](/docs/bindings/java/client/), or [.NET](/docs/bindings/dotnet/client/).
 
 ## Other transports
 

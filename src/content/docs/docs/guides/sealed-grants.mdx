@@ -1,0 +1,80 @@
+---
+title: Sealed grants
+description: Deliver a namespace capability to one recipient through replicated policy records.
+slug: docs/guides/sealed-grants
+---
+
+A **capability** is the credential that permits access to a resource. For an
+Iroh document, its namespace capability permits read or write access to that
+document. Possession therefore matters: distributing it is an access decision.
+
+A sealed grant encrypts a capability for one recipient and stores the envelope
+in a replicated policy document. The recipient can retrieve and open it later,
+so the granter and recipient do not need to be online together.
+
+Rust exposes this under `aster::grants`. The common payload is an Iroh
+document namespace capability with read or write access.
+
+## Before you start
+
+Prepare a policy document, its independently trusted author key, a granter with permission to publish records, and a recipient identity with its secret key. Also choose the target document namespace and whether the recipient needs read or write access. Use this for a worker joining a shared catalog after the administrator has gone offline. The API sequence below needs those application-owned values; it is not a complete key-provisioning script.
+
+## Establish both confidentiality and authority
+
+The envelope is sealed to an X25519 key derived from the recipient's Ed25519
+identity. Opening it requires the corresponding secret. The policy document's
+record paths and encrypted envelopes remain visible to its readers.
+
+Encryption alone does not authenticate the granter. Read through `PolicyDoc`
+with a pinned author and trust only that author's records. Anyone who knows a
+recipient's public key can encrypt a message to it; that does not make the
+message authorized policy.
+
+## Publish and reconcile
+
+1. Choose the namespace capability and intended recipient.
+2. Build `GrantContext` with the app label, granter, recipient, resource,
+   document path, and role.
+3. Seal it with `seal_namespace_grant` and wrap it in `GrantRecord::active`.
+4. Publish at `grant_key(prefix, recipient)` under the trusted author.
+5. Have the recipient fetch through its pinned `PolicyDoc` and call
+   `reconcile_namespace_grant` with the same context.
+
+The context is authenticated associated data. A different recipient, resource,
+path, or role prevents the envelope from opening. Use the supplied context
+helpers rather than assembling the associated data yourself. The typed
+helpers also check that the role agrees with the capability's read/write mode.
+
+## Handle every outcome
+
+| Record state | Recipient action |
+| --- | --- |
+| Active and openable | Apply the capability under the application's policy |
+| Explicitly revoked | Drop the capability and stop affected work |
+| Unopenable | Drop the capability and investigate context or key mismatch |
+| Absent | Wait or reconcile; absence may mean replication has not caught up |
+
+Revoke by writing `GrantRecord::revoked` at the same key. Deleting a key is
+ambiguous to a peer that has not finished syncing.
+
+A revoked record only instructs a cooperating recipient to stop. A recipient
+that already learned a namespace secret can retain it. Revoking a leaked
+capability requires rotating the namespace and re-granting access to the
+remaining participants. Fenced resources also need serializer revocation;
+a policy update alone does not stop in-flight writes.
+
+Identity-derived encryption keys rotate with the node identity. If you need
+separate encryption-key rotation, use the explicit standalone-key helpers and
+define how recipients authenticate the published key.
+
+## Verify delivery and withdrawal
+
+For a read-only catalog grant, choose one application label, resource, record prefix, recipient, and read role. Keep those values identical when sealing and reconciling. Pin the granter author before reading the policy record, then import the opened read capability and read a known catalog entry. The recipient should be able to read, while the capability supplies no namespace write authority.
+
+Change the context path or recipient in a disposable test: opening should fail. Publish an explicit revoked record at the same key and confirm the cooperating recipient drops its imported capability. An absent record during synchronization should remain pending. This verifies reconciliation behavior; it does not prove a recipient erased a secret it already learned. Rotate the target namespace if secrecy must be restored.
+
+## Next steps
+
+- [Documents and capabilities](/docs/guides/data/)
+- [Topology membership](/docs/guides/topology/)
+- [Fenced leases](/docs/guides/leases/)

@@ -4,7 +4,16 @@ slug: "docs/examples/data-heavy-row-mode"
 description: Python ROW codec restrictions and when to use the default XLANG mode.
 ---
 
+A serialization mode decides how application values become bytes and how those
+bytes become values again. Choose a mode before optimizing a large payload:
+it affects which languages and data shapes can participate.
+
 Python exposes `SerializationMode.ROW` through `ForyCodec`. It uses Apache Fory’s row format and is Python-only. The current codec requires exactly one dataclass root type and reconstructs dataclass values when decoding.
+
+For example, a Python-only batch of one record type may fit the ROW codec.
+A service whose request is a query and whose response is a different result
+type does not automatically fit its single-root restriction. Start with
+XLANG unless you have a measured reason and a compatible schema for ROW.
 
 ## Codec restrictions
 

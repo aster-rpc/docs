@@ -1,18 +1,33 @@
 ---
 title: Configuration
 slug: "docs/reference/configuration"
+description: "Configure Python nodes and shared runtime settings with environment variables and TOML."
 ---
 
 
-Reference for selected `AsterConfig` fields, which controls trust, networking, storage, and connectivity for both `AsterServer` and `AsterClient`. Examples on this page use Python. Consult each binding's API for its supported fields.
+Reference for selected Python `AsterConfig` fields and shared runtime settings.
+Python field names and constructor behavior are not a cross-language schema.
+Use the [Rust guide](/docs/bindings/rust/) for Cargo features and builders,
+or the [language index](/docs/reference/compatibility/) for another binding.
 
-## Resolution order
+See [operating a node](/docs/guides/operations/) for identity, storage,
+admission, and shutdown decisions before choosing individual settings.
 
-Configuration values are resolved from three layers. Each layer overrides the previous:
+## Resolve the configuration object
 
-1. **Built-in defaults** -- no configured identity key and in-memory storage. Runtime development-mode handling is described below.
-2. **TOML config file** -- loaded via `AsterConfig.from_file("aster.toml")`.
-3. **Environment variables** -- `ASTER_*` prefixed. Always win when set.
+For a worker that must retain its endpoint identity and stored data after a
+restart, preserve both a stable secret key and persistent storage. A storage
+directory alone does not establish the application's trust policy. For protected
+consumer admission, also supply the independent root public key and explicitly
+set `allow_all_consumers=False` on the high-level server.
+
+`AsterConfig.from_file()` loads defaults, then TOML, then `ASTER_*` environment
+overrides. `AsterConfig.from_env()` loads defaults and environment values without
+a TOML file. Constructing `AsterConfig(...)` directly uses the supplied fields
+and defaults; it does not automatically merge environment settings.
+
+The high-level wrappers then resolve selected identity and constructor fields.
+Environment variables therefore do not have universal final precedence.
 
 ```python
 from aster import AsterConfig
@@ -23,9 +38,31 @@ config = AsterConfig.from_env()
 # Load from TOML file, with env var overrides
 config = AsterConfig.from_file("aster.toml")
 
-# Inline (testing, scripts)
-config = AsterConfig(root_pubkey=pub_bytes, allow_all_consumers=True)
+# Inline development settings (permissive admission)
+config = AsterConfig(allow_all_consumers=True)
 ```
+
+## Resolve high-level wrapper inputs
+
+| Input | Resolution |
+| --- | --- |
+| Identity file path | Explicit `identity=` overrides `config.identity_file`; otherwise the current directory's `.aster-identity` may be detected |
+| Root public key | Explicit wrapper argument, then selected identity peer entry, then config root fields |
+| Consumer destination | `address=`, then `endpoint_addr=`, then `config.endpoint_addr` |
+| Consumer credential | Explicit credential file, then selected identity peer credential, then config credential file |
+| Server permissive flags | Explicit wrapper argument, then config value; development-mode handling can open consumer admission |
+
+An identity file's embedded root is configuration input, not independent proof
+that the root is trusted. Provision and check it through your deployment's
+trusted path. Inspect both the configuration object and the wrapper arguments
+when diagnosing a surprising result; `print_config()` reports the object rather
+than every later wrapper decision.
+
+Python `AsterServer` and `AsterClient` also merge the node identity. A config
+`secret_key` takes precedence over the identity file's node key. An explicit
+key file must agree with that key. With `storage_path` and no configured key,
+the wrappers use `<storage_path>/node.key`; preserve that file with the data.
+Low-level configuration alone does not apply every wrapper default.
 
 ## Field reference
 
@@ -33,9 +70,9 @@ config = AsterConfig(root_pubkey=pub_bytes, allow_all_consumers=True)
 
 | Field | Type | Default | Env var | Description |
 |-------|------|---------|---------|-------------|
-| `root_pubkey` | `bytes` or `None` | `None` | `ASTER_ROOT_PUBKEY` (hex) | 32-byte ed25519 root public key. The deployment trust anchor. Highest priority. |
+| `root_pubkey` | `bytes` or `None` | `None` | `ASTER_ROOT_PUBKEY` (hex) | 32-byte ed25519 root public key. The deployment trust anchor. Takes precedence over `root_pubkey_file` within the config object. |
 | `root_pubkey_file` | `str` or `None` | `None` | `ASTER_ROOT_PUBKEY_FILE` | Path to a file containing the root public key (hex string or JSON with `"public_key"` field). |
-| `enrollment_credential_file` | `str` or `None` | `None` | `ASTER_ENROLLMENT_CREDENTIAL` | Path to a JSON enrollment credential signed by the root key. Required for consumers in production. |
+| `enrollment_credential_file` | `str` or `None` | `None` | `ASTER_ENROLLMENT_CREDENTIAL` | Path to a root-signed consumer credential. A selected identity peer can supply the credential instead. |
 | `enrollment_credential_iid` | `str` or `None` | `None` | `ASTER_ENROLLMENT_CREDENTIAL_IID` | Cloud Instance Identity Document token. Required when the credential's policy includes `aster.iid_*` attributes. |
 | `allow_all_consumers` | `bool` | `False` | `ASTER_ALLOW_ALL_CONSUMERS` | Skip consumer admission gate. Set `true` for development. |
 | `allow_all_producers` | `bool` | `True` | `ASTER_ALLOW_ALL_PRODUCERS` | Skip producer admission gate. Python currently supports only `True`. |
@@ -63,7 +100,8 @@ config = AsterConfig(root_pubkey=pub_bytes, allow_all_consumers=True)
 
 | Field | Type | Default | Env var | Description |
 |-------|------|---------|---------|-------------|
-| `secret_key` | `bytes` or `None` | `None` | `ASTER_SECRET_KEY` (base64) | 32-byte node identity key. Determines the stable `EndpointId`. If unset, a fresh key is generated each run. |
+| `secret_key` | `bytes` or `None` | `None` | `ASTER_SECRET_KEY` (base64) | 32-byte node identity key. Determines the stable `EndpointId`. Without a configured key source, a fresh key is generated. |
+| `secret_key_file` | `str` or `None` | `None` | `ASTER_SECRET_KEY_FILE` | Persistent node-key file. Loaded when present; created with restrictive permissions when absent. An invalid key or conflict with `secret_key` raises an error. |
 | `relay_mode` | `str` or `None` | `None` | `ASTER_RELAY_MODE` | Relay server mode: `"default"`, `"disabled"`, or a custom relay URL. |
 | `bind_addr` | `str` or `None` | `None` | `ASTER_BIND_ADDR` | Local bind address (e.g. `"0.0.0.0:9000"`). |
 | `enable_monitoring` | `bool` | `False` | `ASTER_ENABLE_MONITORING` | Enable endpoint monitoring/metrics. |
@@ -102,7 +140,9 @@ These fields map to iroh/noq QUIC transport configuration. They are all optional
 
 ## TOML file format
 
-The example below uses `[trust]`, `[connect]`, `[storage]`, and `[network]`. Additional settings use `[health]` and `[logging]`.
+The optional example below shows selected sections. Replace the destination
+placeholder before using it for a consumer. Persist the node-key file as well
+as the storage directory. Additional settings use `[health]` and `[logging]`.
 
 ```toml
 [trust]
@@ -111,12 +151,13 @@ allow_all_consumers = false
 allow_all_producers = true
 
 [connect]
-endpoint_addr = "aGVsbG8gd29ybGQ..."
+endpoint_addr = "<producer aster1 address>"
 
 [storage]
 path = "/var/lib/aster"
 
 [network]
+secret_key_file = "/var/lib/aster/node.key"
 relay_mode = "default"
 bind_addr = "0.0.0.0:9000"
 # secret_key = "<base64-encoded 32 bytes>"
@@ -133,9 +174,10 @@ transport_enable_segmentation_offload = true
 
 ## Environment variables
 
-All environment variables use the `ASTER_` prefix. Boolean values accept `true`/`false`, `1`/`0`, `yes`/`no`, or `on`/`off` (case-insensitive).
+The settings below are an optional value reference with placeholders, rather
+than a shell script. Set only the values your application needs. Boolean values accept `true`/`false`, `1`/`0`, `yes`/`no`, or `on`/`off` (case-insensitive).
 
-```bash
+```text
 # Trust
 ASTER_ROOT_PUBKEY=<64-char hex string>
 ASTER_ROOT_PUBKEY_FILE=~/.aster/root_pub.key
@@ -156,6 +198,7 @@ ASTER_HEALTH_HOST=127.0.0.1   # Bind address for health server
 
 # Network
 ASTER_SECRET_KEY=<base64-encoded 32 bytes>
+ASTER_SECRET_KEY_FILE=/var/lib/aster/node.key
 ASTER_RELAY_MODE=default
 ASTER_BIND_ADDR=0.0.0.0:9000
 ASTER_ENABLE_MONITORING=false
@@ -180,7 +223,9 @@ ASTER_IDENTITY_FILE=.aster-identity
 
 ## `.aster-identity` file format
 
-The `.aster-identity` file is a TOML file generated by `aster enroll node`. It contains the node's secret key and one or more peer enrollment entries:
+The `.aster-identity` file is a TOML file generated by `aster enroll node`. It contains the node's secret key and one or more peer enrollment entries.
+This schematic example is not a signed credential; generate real entries with
+the [CLI enrollment command](/docs/reference/cli/#aster-enroll-node):
 
 ```toml
 [node]
@@ -191,7 +236,7 @@ name = "billing-producer"
 role = "producer"
 root_pubkey = "<64-char hex>"
 type = "policy"
-expires_at = 1735689599
+expires_at = 1893456000 # illustrative; issue a credential for your policy
 endpoint_id = "<64-char hex>"
 attributes = {}
 signature = "<hex-encoded signature>"
@@ -201,7 +246,7 @@ name = "analytics-consumer"
 role = "consumer"
 root_pubkey = "<64-char hex>"
 type = "policy"
-expires_at = 1735689599
+expires_at = 1893456000 # illustrative; issue a credential for your policy
 attributes = {}
 signature = "<hex-encoded signature>"
 ```
@@ -271,9 +316,13 @@ See the [Observability guide](/docs/guides/observability) for full details on st
 
 ## Dev mode auto-detection
 
-When no root public key is configured and admission is needed, `AsterConfig` generates an ephemeral root keypair automatically. In this mode:
+The high-level Python runtime can generate an ephemeral root during root
+resolution. Development-mode admission handling belongs to `AsterServer`,
+rather than to the configuration object's constructor. With an ephemeral
+configured root and no explicit `allow_all_consumers=` argument or root-key
+file, the server opens consumer admission:
 
 - `AsterServer` sets `allow_all_consumers=True` so consumers can connect without credentials.
-- A warning is logged: `"Dev mode: allow_all_consumers=True (ephemeral root key)."`
+- A development-mode message is logged: `"Dev mode: allow_all_consumers=True (ephemeral root key)."`
 
-To require consumer enrollment, configure the root public key and keep `allow_all_consumers=False`. Configuring a root key does not override an explicit permission to allow all consumers. Review the [trust model](/docs/concepts/trust-model/) before deployment.
+To require consumer enrollment, configure a trusted root public-key file and pass `allow_all_consumers=False` explicitly to the server. Configuring a root key does not override an explicit permission to allow all consumers. Review the [trust model](/docs/concepts/trust-model/) before deployment.

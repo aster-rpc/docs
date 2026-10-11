@@ -1,0 +1,86 @@
+---
+title: Java and Kotlin
+description: JVM packages, native library loading, and Kotlin's relationship to the Java runtime.
+slug: docs/bindings/java
+---
+
+The JVM binding uses JDK 25 and Aster's native Rust engine. Java annotation
+processing and Kotlin KSP generate service and payload support for the same
+runtime. Use it for JVM applications that need peer calls while retaining
+Java futures, virtual-thread handlers, and deterministic native cleanup.
+
+Start with the [complete downloadable JVM project](/docs/quickstart/java/),
+which supplies compiler configuration, codec registration, and native loading.
+The dependency fragments below are parts of that setup.
+
+| Part | Generated or supplied by Aster | Your application supplies |
+| --- | --- | --- |
+| Unary dispatch | APT or KSP adapter and service-provider metadata | Annotated implementation and build processor configuration |
+| Payload codec | Fory codec and registration helpers | Registration of every payload, including nested types |
+| Streaming dispatch | Streaming SPI interfaces | Explicit dispatcher and encode/decode logic |
+| Native runtime | Platform classifier artifact | Matching classifier dependency and native-access launch flag |
+
+## Packages
+
+The preview is published to Aster's
+[Maven registry](https://forge.emrul.dev/Aster/-/packages). Configure this
+repository in your Maven project:
+
+```xml
+<repositories>
+  <repository>
+    <id>aster</id>
+    <url>https://forge.emrul.dev/api/packages/Aster/maven</url>
+  </repository>
+</repositories>
+```
+
+The runtime and annotation coordinates are:
+
+```xml
+<dependencies>
+  <dependency>
+    <groupId>site.aster</groupId>
+    <artifactId>aster-runtime</artifactId>
+    <version>0.3.893</version>
+  </dependency>
+  <dependency>
+    <groupId>site.aster</groupId>
+    <artifactId>aster-annotations</artifactId>
+    <version>0.3.893</version>
+  </dependency>
+</dependencies>
+```
+
+Also include the release's `aster-runtime` native classifier JAR for your
+operating system and architecture. For Linux x86-64 the classifier is
+`linux-x86_64`; it is an additional dependency with the same runtime version.
+The Java-only JAR does not replace the native library. Run with
+`--enable-native-access=ALL-UNNAMED` when using the classpath.
+
+Java service generation uses `site.aster:aster-codegen-apt`; Kotlin uses
+`site.aster:aster-codegen-ksp`. Keep generated code, runtime, annotations, and
+native artifacts on the same release. The [JVM tutorial](/docs/quickstart/java/) provides the complete compiler,
+code-generation, and native setup with a tested downloadable project.
+
+## Java and Kotlin boundaries
+
+Kotlin calls the same JVM runtime and owns the same native resources as Java.
+It is not a separate native adapter. The RPC interoperability matrix qualifies
+Java alongside Rust, Python, TypeScript, Go, and .NET; Kotlin is not a separate
+entry in that matrix.
+
+Use explicit wire names and matching field representations when interoperating
+with other bindings. Keep native owners alive for asynchronous operations and
+close subscriptions, clients, and servers deterministically. Telemetry goes
+through the shared Rust pipeline, with Rust log events forwarded to SLF4J.
+
+## Next steps
+
+- [First service](/docs/quickstart/java/)
+- [JVM server](/docs/bindings/java/server/)
+- [JVM client](/docs/bindings/java/client/)
+
+- [Language and release compatibility](/docs/reference/compatibility/)
+- [Contract identity](/docs/concepts/contract-identity/)
+- [Observability](/docs/guides/observability/)

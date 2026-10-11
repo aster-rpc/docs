@@ -5,9 +5,10 @@ slug: "docs/guides/services"
 ---
 
 
-# Defining services and types
 
-This guide covers everything you need to define Aster RPC services: the `@service` and `@rpc` decorators, streaming patterns, request/response types, wire identity, contract identity, and serialization modes.
+This is the Python reference for service decorators and payload definitions. Use it when extending a working service, for example adding a task-list stream to a task creator. For a walkthrough of the four call patterns in Python and TypeScript, start with [Define a service](/docs/guides/define-a-service/).
+
+Install and run the [Python first service](/docs/quickstart/python/) before using these fragments. A definition describes the wire interface; the [server](/docs/bindings/python/server/) registers handlers and the [client](/docs/bindings/python/client/) owns the connection. Names such as `WatchRequest` in individual examples are application-defined payloads.
 
 ## The `@service` decorator
 
@@ -43,9 +44,9 @@ class ChatSession:
 | `name` (positional) | `str` | Class name | The service name used on the wire and in service discovery. |
 | `version` | `int` | `1` | Service version. Consumers specify which version they want. |
 | `serialization` | `SerializationMode` or `list[SerializationMode]` | `[XLANG]` | Which serialization modes this service supports. |
-| `scoped` | `str` | `"shared"` | `"shared"` (one instance serves all connections) or `"session"` (a new instance is created per connection -- the class `__init__` must accept a `peer` parameter). |
+| `scoped` | `str` | `"shared"` | `"shared"` (one instance serves all connections) or `"session"` (an instance is keyed by connection, session ID, and service; Python `__init__` must accept `peer`). |
 | `interceptors` | `list[type]` | `[]` | Interceptor classes applied to every method in the service. |
-| `max_concurrent_streams` | `int` or `None` | `None` | Limits concurrent streams per connection. `None` means unlimited. |
+| `max_concurrent_streams` | `int` or `None` | `None` | Accepted as metadata; the Python dispatcher does not enforce this setting. Configure and test actual transport/application resource limits separately. |
 
 ## The `@rpc` decorator
 
@@ -190,7 +191,7 @@ class Person:
 
 ### Supported field types
 
-Aster supports all types that Apache Fory can serialize:
+The Python codec supports these common field shapes. Cross-language compatibility also depends on the peer binding and its schema mapping; this list does not qualify every combination:
 
 - Primitives: `int`, `float`, `str`, `bool`, `bytes`, `bytearray`
 - Collections: `list[T]`, `dict[K, V]`, `set[T]`
@@ -242,13 +243,7 @@ This is harmless during development but serves as a reminder to add explicit tag
 
 ## Contract identity
 
-Every `@service`-decorated class gets a deterministic **contract ID** -- a BLAKE3 hash derived from:
-
-- The service name and version.
-- Each method's name, RPC pattern, and parameter types.
-- The serialization mode.
-
-Two services with the same name, version, methods, types, and serialization mode will produce the same contract ID, regardless of the implementation. This enables service discovery: a consumer can ask "give me a service with contract ID X" and know it will get a compatible interface.
+A **contract ID** is a deterministic BLAKE3 hash of the canonical interface descriptor. It covers service and method settings as well as the reachable payload type graph, rather than the handler implementation. Matching the name and version alone is insufficient. See [contract identity](/docs/concepts/contract-identity/) for the full hash inputs and change rules.
 
 The contract ID is computed automatically. You do not need to set it. `contract_id_from_service` returns it for any `@service`-decorated class:
 
@@ -264,7 +259,7 @@ cid = contract_id_from_service(Calculator)
 print(cid)  # e.g. "a1b2c3d4..."
 ```
 
-If you change a method signature, add a method, or change the serialization mode, the contract ID changes. This is intentional -- it signals a breaking change in the service interface.
+If you change a method signature, add a method, or change the serialization mode, the contract ID changes. Compare the new descriptor with existing callers before rollout; a changed ID requires an explicit compatibility decision.
 
 ## Serialization modes
 
@@ -351,3 +346,9 @@ class TodoService:
         for task in self._tasks.values():
             yield task
 ```
+
+## Verify the service behavior
+
+With the Todo service registered, call `create_task` once, then consume `list_tasks`. Expect the created ID and title to appear in the stream. A second creation produces a different ID, so retrying a timed-out creation can create a duplicate; keep it non-idempotent or add application deduplication. This example stores tasks in memory and loses them on restart.
+
+Next, [register the Python server](/docs/bindings/python/server/) and [call it](/docs/bindings/python/client/).

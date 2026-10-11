@@ -1,12 +1,21 @@
 ---
 title: Identity-first transport
 slug: "docs/concepts/transport"
+description: "Understand endpoint identity, address hints, QUIC paths, protocol routing, and network limits."
 ---
 
 
 Aster's transport layer is [iroh](https://iroh.computer): a networking library that provides QUIC connections identified by ed25519 public keys, with built-in NAT traversal and relay fallback.
 
-The transport layer is independent. You can use iroh without Aster for any application that needs encrypted, authenticated, peer-to-peer connectivity.
+For a worker moving from a customer LAN to another network, three things have
+separate roles: its key identifies the peer, address hints help find it, and a
+network path carries the connection. Preserve the secret key to preserve the
+identity. Refresh address information and test reachable paths when the
+network changes.
+
+Transport authentication proves possession of the expected endpoint key.
+Your application's [trust policy](/docs/concepts/trust-model/) decides whether
+that peer may use the service.
 
 ## EndpointId: public key as address
 
@@ -49,7 +58,9 @@ This single string encodes:
 - A relay server address (for NAT traversal)
 - Direct IP addresses (for LAN connectivity)
 
-The address is printed by `AsterServer` on startup and passed to `AsterClient` to connect:
+The high-level Python server exposes the address for a client to use. This API
+fragment assumes the service and imports from the [Python quickstart](/docs/quickstart/python/);
+copy the actual printed address into the consumer:
 
 ```python
 # Producer
@@ -57,8 +68,8 @@ async with AsterServer(services=[MyService()]) as srv:
     print(srv.address)  # aster14TudW...
 
 # Consumer
-client = AsterClient(address="aster14TudW...")
-await client.connect()
+async with AsterClient(address="<actual printed aster1 address>") as client:
+    ...  # make calls while the connection is owned by this context
 ```
 
 The `aster1` prefix is a human-readable marker. The rest is base58-encoded binary containing the endpoint identity and network hints. The address contains no secret key; its length depends on the included hints.
@@ -72,16 +83,26 @@ Under the hood, the address is decoded into a `NodeAddr` containing the `Endpoin
 QUIC connections use ALPN (Application-Layer Protocol Negotiation) to agree on which protocol to speak. iroh supports multiple ALPNs on a single endpoint:
 
 - `aster/1` -- the Aster RPC protocol
-- `iroh-blobs` -- content-addressed blob transfer
-- `iroh-docs` -- CRDT document replication (used for the service registry)
-- `iroh-gossip` -- pub-sub messaging
+- Blob protocol (`aster::alpns::BLOBS`) -- content-addressed blob transfer
+- Document protocol (`aster::alpns::DOCS`) -- document replication used by the registry
+- Gossip protocol (`aster::alpns::GOSSIP`) -- pub-sub messaging
 - `aster.consumer_admission` -- consumer enrollment (direct credentials)
-- `aster.producer_admission` -- producer enrollment
-- `aster.admission` (optional) -- delegated admission via `@aster`-issued enrollment tokens
 
-A single iroh endpoint can serve all of these simultaneously. ALPN selects a protocol for each QUIC connection. RPC, blob transfers, and gossip use protocol-specific connections to the same endpoint.
+Use the SDK protocol constants when registering or dialing built-in data
+protocols; library names are not their literal ALPN bytes. A single iroh
+endpoint can serve the configured protocols simultaneously. ALPN selects a protocol for each QUIC connection. RPC, blob transfers, and gossip use protocol-specific connections to the same endpoint.
 
-The admission ALPNs handle the trust handshake before RPC begins. `aster.consumer_admission` verifies credentials signed by the operator's root key. `aster.admission` verifies tokens issued by the `@aster` registry service -- this is the delegated path used when consumers discover services through `@aster` and receive enrollment tokens via access grants.
+The listed admission protocols belong to the high-level Python enrollment
+workflow. Python does not implement producer mesh admission and rejects
+`allow_all_producers=False`. Rust and other bindings expose their own policy
+integration; do not assume they perform the Python handshake.
+
+In the Python workflow, `aster.consumer_admission` verifies consumer
+credentials signed by the operator's root key before RPC begins. Python does
+not register or handle delegated admission (`aster.admission`); a token issued
+by `@aster` cannot admit a consumer to a Python producer. Use direct
+consumer-admission credentials instead. Registry publication and access records
+do not install that missing protocol handler.
 
 ## Unified node
 

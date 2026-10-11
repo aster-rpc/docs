@@ -1,0 +1,75 @@
+---
+import './diagram.css';
+// Rendered at build time; inherits the page theme without client JavaScript.
+---
+<figure class="aster-diagram sdk-layers not-content">
+  <svg class="desktop" viewBox="0 0 680 320" role="img" aria-labelledby="sdk-layers-title sdk-layers-desc">
+    <title id="sdk-layers-title">Aster SDK layers</title>
+    <desc id="sdk-layers-desc">Rust and the language bindings use a shared Rust engine for RPC, data, and coordination. Iroh connects peers directly or through relays. HTTP clients can reach RPC through the optional Salvo transport.</desc>
+    <g class="layer">
+      <rect x="16" y="16" width="648" height="68" rx="8" />
+      <text x="340" y="44" class="heading">Application APIs</text>
+      <text x="340" y="66">Rust · Python · TypeScript · Go · Java · .NET</text>
+    </g>
+    <path d="M340 84v26m-5-6 5 6 5-6" />
+    <g class="layer engine">
+      <rect x="16" y="112" width="648" height="70" rx="8" />
+      <text x="340" y="141" class="heading">Shared Rust engine</text>
+      <text x="340" y="163">RPC dispatch · data protocols · coordination</text>
+    </g>
+    <path d="M175 182v28m-5-6 5 6 5-6M505 182v28m-5-6 5 6 5-6" />
+    <g class="layer">
+      <rect x="16" y="212" width="318" height="88" rx="8" />
+      <text x="175" y="240" class="heading">Iroh peers</text>
+      <text x="175" y="262">Authenticated QUIC</text>
+      <text x="175" y="283">Direct paths + relay fallback</text>
+      <rect x="346" y="212" width="318" height="88" rx="8" />
+      <text x="505" y="240" class="heading">Optional HTTP transport</text>
+      <text x="505" y="262">HTTPS + WebTransport</text>
+      <text x="505" y="283">Application authentication</text>
+    </g>
+  </svg>
+  <svg class="mobile" viewBox="0 0 360 450" role="img" aria-labelledby="sdk-mobile-title sdk-mobile-desc">
+    <title id="sdk-mobile-title">Aster SDK layers</title>
+    <desc id="sdk-mobile-desc">Application language APIs use a shared Rust engine. It connects through Iroh or the optional HTTP transport, each with its own authentication boundary.</desc>
+    <g class="layer">
+      <rect x="1" y="8" width="358" height="82" rx="8" />
+      <text x="180" y="36" class="heading">Application APIs</text>
+      <text x="180" y="58">Rust · Python · TypeScript</text>
+      <text x="180" y="78">Go · Java · .NET</text>
+    </g>
+    <path d="M180 90v25m-5-6 5 6 5-6" />
+    <g class="layer engine">
+      <rect x="1" y="118" width="358" height="76" rx="8" />
+      <text x="180" y="148" class="heading">Shared Rust engine</text>
+      <text x="180" y="171">RPC · data · coordination</text>
+    </g>
+    <path d="M180 194v25m-5-6 5 6 5-6M180 206H8V322H180V332m-5-6 5 6 5-6" />
+    <g class="layer">
+      <rect x="20" y="222" width="339" height="88" rx="8" />
+      <text x="180" y="250" class="heading">Iroh peers</text>
+      <text x="180" y="273">Authenticated QUIC</text>
+      <text x="180" y="295">Direct paths + relay fallback</text>
+      <rect x="20" y="336" width="339" height="88" rx="8" />
+      <text x="180" y="364" class="heading">Optional HTTP transport</text>
+      <text x="180" y="387">HTTPS + WebTransport</text>
+      <text x="180" y="409">Application authentication</text>
+    </g>
+  </svg>
+  <figcaption>One engine, with transport-specific authentication at its boundaries.</figcaption>
+</figure>
+<style>
+  .sdk-layers { margin: 1.5rem 0; }
+  svg { width: 100%; height: auto; display: block; }
+  .mobile { display: none; }
+  rect { fill: var(--sl-color-gray-3); fill-opacity: .08; stroke: var(--sl-color-gray-4); }
+  .engine rect { fill: var(--sl-color-accent); fill-opacity: .14; stroke: var(--sl-color-accent); }
+  text { fill: var(--sl-color-text); text-anchor: middle; font: 15px var(--sl-font); }
+  .heading { font-size: 18px; font-weight: 600; }
+  path { stroke: var(--sl-color-gray-3); fill: none; stroke-width: 1.5; }
+  figcaption { font-size: .85rem; color: var(--sl-color-gray-2); }
+  @media (max-width: 600px) {
+    .desktop { display: none; }
+    .mobile { display: block; }
+  }
+</style>

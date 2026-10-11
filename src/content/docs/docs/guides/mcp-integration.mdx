@@ -7,9 +7,10 @@ slug: "docs/guides/mcp-integration"
 import MermaidDiagram from '@components/MermaidDiagram.astro';
 
 
-# AI agent integration (MCP)
 
-The Aster CLI can expose service methods to MCP-compatible agents. The `aster mcp` command runs an MCP (Model Context Protocol) server that exposes your services as tools -- with full type information, dynamic discovery, and capability-based security.
+The Aster CLI bridge turns published service methods into tools for an [MCP](https://modelcontextprotocol.io/) host. Use it to let an assistant query a worker's catalog without writing a separate tool adapter. The bridge discovers payload schemas and forwards calls; the producer must still authorize each method.
+
+Start the [Python first service](/docs/quickstart/python/) and install a CLI exposing `aster mcp` as described in the [CLI reference](/docs/reference/cli/). Keep the producer online and use its real address. CLI and SDK packaging have separate compatibility requirements. This integration has not received a clean-host MCP-host walkthrough.
 
 The bridge derives tool schemas from the published service contract.
 
@@ -34,8 +35,7 @@ Configure your MCP client to launch this command over stdio, as shown below.
 3. Each method becomes an MCP tool with a JSON Schema derived from the request type fields
 4. Tool calls are forwarded as Aster RPC calls; results returned as JSON
 
-The MCP server does not merely list available methods -- it uses dynamic type
-synthesis to actually invoke them. Contract manifests include Fory wire tags
+The MCP server uses dynamic type synthesis to invoke supported methods. Contract manifests include Fory wire tags
 for every field, so the server can build correctly serialized typed requests
 directly from the agent's JSON arguments. No local Python type definitions or
 generated stubs are needed.
@@ -45,24 +45,23 @@ The agent sees tools like:
 ```
 HelloService.say_hello
   - name (string, required)
-  - greeting (string, default: "Hello")
 
 FileStore.get (unary)
-FileStore.list (server_stream, returns array)
-FileStore.upload (client_stream, accepts _items array)
+FileStore.list (server_stream schema; runtime qualification required)
+FileStore.upload (client_stream, accepts aster_items array)
 ```
 
 ## Security model
 
 The bridge uses Aster credentials and local exposure controls. Configure both for the methods the agent needs.
 
-### Layer 1: Credential-based filtering (default)
+### Producer authorization
 
 The MCP server is just another consumer. Give it a restricted credential:
 
 ```bash
 # Mint a credential specifically for AI agent use
-aster trust sign --root-key root.key --type consumer \
+aster trust sign --root-key root.key --type policy \
   --attributes '{"aster.role": "ai-reader"}' --out ai-agent.token
 
 # MCP server uses the AI's credential, not yours
@@ -72,18 +71,21 @@ aster mcp <peer> --rcan ai-agent.token
 On the producer, declare which methods the AI role can access:
 
 ```python
+from aster import service, rpc, any_of
+
+# Definition fragment: supply these application payload classes.
 @service(name="DataService")
 class DataService:
-    @rpc(requires=ANY_OF("reader", "ai-reader"))  # AI can read
-    async def get_record(self, req): ...
+    @rpc(requires=any_of("reader", "ai-reader"))  # AI can read
+    async def get_record(self, req: RecordRequest) -> RecordResponse: ...
 
-    @rpc(requires=ROLE("admin"))  # AI cannot see this
-    async def delete_record(self, req): ...
+    @rpc(requires="admin")  # AI cannot call this
+    async def delete_record(self, req: RecordRequest) -> DeleteResult: ...
 ```
 
-Result: the agent sees `DataService.get_record` but never knows `delete_record` exists.
+The producer should allow the read and deny deletion for the restricted principal. Do not assume a denied method is absent from discovered manifests or the MCP tool list. Use local allow/deny patterns to control tool visibility, and test producer denial independently. The decorator block is a policy sketch; provide `RecordRequest`, `RecordResponse`, `DeleteResult`, and handler bodies before registering it.
 
-### Layer 2: Allow/deny patterns
+### Local tool visibility
 
 Local glob patterns as a safety net, even if the credential allows more:
 
@@ -104,9 +106,9 @@ Do not rely on the CLI’s `--confirm` prompt when an MCP host launches the brid
 | Aster Pattern | MCP Behavior |
 |---|---|
 | `unary` | Direct request/response (1:1 mapping) |
-| `server_stream` | Collects items into a JSON array. Control with `_max_items` (default 100) and `_timeout` (default 30s) |
-| `client_stream` | Pass items via `_items` array parameter |
-| `bidi_stream` | Not exposed as tools (Phase 1) |
+| `server_stream` | Schema advertises collection controls `aster_max_items` and `aster_timeout`; runtime collection needs qualification before use |
+| `client_stream` | Pass items via `aster_items` array parameter |
+| `bidi_stream` | Not exposed as tools |
 
 Example: calling a server-streaming method:
 
@@ -115,17 +117,17 @@ Example: calling a server-streaming method:
   "name": "Analytics.watchMetrics",
   "arguments": {
     "interval": 5,
-    "_max_items": 10,
-    "_timeout": 15
+    "aster_max_items": 10,
+    "aster_timeout": 15
   }
 }
 ```
 
-Returns a JSON array of up to 10 items collected over 15 seconds.
+These are the advertised schema controls. Source review found a problem in the bridge's asynchronous server-stream collection path; do not depend on this path without testing the installed CLI. Prefer a bounded unary query for assistant tools until that integration is qualified.
 
-## Configuration with Claude Code
+## Configure an MCP host
 
-Add to your `.claude/settings.json`:
+Use your host's documented stdio-server configuration location. The following is a common `mcpServers` configuration shape, not a verified settings path for every host. Use an absolute executable path if the host does not inherit your shell PATH:
 
 ```json
 {
@@ -165,6 +167,12 @@ Options:
   --allow PATTERN       Glob for allowed tools (repeatable)
   --deny PATTERN        Glob for denied tools (repeatable)
 ```
+
+## Verify the exposed tool set
+
+Start with an allow pattern for the greeting method alone. Ask the host to list tools, invoke the greeting with `name` set to `World`, and expect `Hello, World!`. Confirm methods outside the allow pattern are absent. Then test an otherwise visible but unauthorized method with a restricted credential and confirm producer rejection.
+
+If no tools appear, check admission, manifest arrival, and local filters separately. If a tool is listed but fails, inspect payload compatibility and method authorization. Launch credentials and token paths belong to the bridge process; avoid unintentionally inheriting an operator credential from the host environment.
 
 ## Next steps
 

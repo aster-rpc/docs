@@ -1,140 +1,138 @@
 ---
 title: Cross-language interoperability
-slug: "docs/examples/cross-language"
+slug: docs/examples/cross-language
+description: Call a Python service from JavaScript and understand the contract and payload rules that make it work.
 ---
 
+Cross-language RPC lets a caller and a service use different programming
+languages while sharing a service interface. You might keep a Python service
+close to a model or data pipeline and call it from a Node application.
 
-Aster is designed so that a service defined in one language can be consumed from any other supported language. This page explains how cross-language interop works, what guarantees it provides, and how to structure services for multi-language deployments. The examples on this page use Python.
+This walkthrough calls the Python greeting service from JavaScript using the
+TypeScript SDK package. The client reads the producer's published contract and
+uses a dynamic proxy, so it needs no local copy of the Python classes. The
+payload still travels as typed binary XLANG data.
 
-## Compatibility requirements
+## Before you start
 
-A service defined in Python can be consumed by a Java client (or Go, Rust, .NET, JavaScript) provided both sides agree on the wire types and RPC contract. Some bindings require build-time metadata generation. The `contract_id` -- a deterministic hash of the service interface -- identifies the declared service interface. Matching identities do not replace cross-language execution tests.
+Complete the **Python** producer in the
+[first-service tutorial](/docs/quickstart/python/), and keep it running.
+It must expose `HelloService.say_hello` with the explicit `hello/HelloRequest`
+and `hello/HelloResponse` wire names shown there. Copy its current address.
 
-## How it works
+In a separate Node project, install the TypeScript SDK using the same
+tutorial's TypeScript installation instructions. This example uses an `.mjs`
+file directly; it requires neither TypeScript compilation nor generated client
+metadata. A statically typed TypeScript client has a different build workflow,
+covered in [TypeScript build setup](/docs/guides/typescript-build-setup/).
 
-### Wire type tags as the interop contract
+This pair was executed on Apple Silicon macOS with the public Python package
+and Node SDK. It tests one string request and response over a real peer
+connection. It does not qualify other payload shapes, streaming patterns, or
+language pairs. The producer uses permissive development admission.
 
-Cross-language interop is built on `@wire_type` tags. When a Python producer serializes a `TaskRequest` tagged as `"myapp/TaskRequest"`, a Java consumer can deserialize it by registering the same tag on its equivalent class.
+## Call Python from JavaScript
 
-```python
-# Python producer
-from aster import wire_type
-from dataclasses import dataclass
+Save `cross-language.mjs` in the Node project:
 
-@wire_type("myapp/TaskRequest")
-@dataclass
-class TaskRequest:
-    task_id: str = ""
-    priority: int = 0
+```javascript
+import { AsterClientWrapper } from '@aster-rpc/aster';
+
+const address = process.env.ASTER_ENDPOINT_ADDR;
+if (!address) throw new Error('Set ASTER_ENDPOINT_ADDR to the Python producer address.');
+const client = new AsterClientWrapper({ address });
+try {
+  await client.connect();
+  const hello = await client.proxy('HelloService');
+  const response = await hello.say_hello({ name: 'JavaScript' });
+  if (response.message !== 'Hello, JavaScript!') {
+    throw new Error(`Unexpected response: ${JSON.stringify(response)}`);
+  }
+  console.log(response.message);
+} finally {
+  await client.close();
+}
 ```
 
-The tag `"myapp/TaskRequest"` is the contract. Any language binding that registers a type with this tag and compatible fields can deserialize the data.
+Run it with the complete address printed by the Python producer:
 
-### Contract identity
-
-Each `@service`-decorated class has a `contract_id`: a canonical hash computed from the service name, version, method signatures, and wire type tags. Matching `contract_id` values establish that the declared interfaces agree; the chosen codecs and field representations must also be compatible.
-
-```bash
-# Generate the contract manifest to inspect contract_id values
-aster contract gen --service myapp.services:TaskService --out .aster/manifest.json
+```sh
+ASTER_ENDPOINT_ADDR="<producer address>" node cross-language.mjs
 ```
 
-The manifest contains the `contract_id` for each service version. Consumers can verify compatibility before connecting.
+Expected output:
 
-### XLANG serialization mode
-
-For typed binary cross-language calls, use `SerializationMode.XLANG` (the default). This mode uses Apache Fory's cross-language serialization, which encodes type tags and field schemas in the wire format.
-
-```python
-from aster import service, SerializationMode
-
-# XLANG is the default -- this is equivalent to @service
-@service(serialization=[SerializationMode.XLANG])
-class TaskService:
-    ...
+```text
+Hello, JavaScript!
 ```
 
-`NATIVE` and `ROW` are Python-only modes. Dynamic proxies accept dictionary-like values but synthesize Fory XLANG types from the published contract; JSON wire mode has been retired.
+The consumer closes its resources in `finally`, including when a call fails.
+The Python producer remains running; stop it with Ctrl+C when finished.
 
-## Example: Python service contract
+The method name stays `say_hello`: a dynamic client uses the producer's wire
+method names, even when they differ from the caller language's conventions.
+The TypeScript producer in the first-service tutorial instead defines
+`sayHello`, so it is not a substitute for the Python producer in this step.
 
-### Python service
+## What crosses the language boundary
 
-```python
-from dataclasses import dataclass
-from typing import AsyncIterator
+| Piece | What both sides need to agree on |
+| --- | --- |
+| Service and method | The published name and call pattern, such as `HelloService.say_hello` with one request and one response. |
+| Wire type name | A stable payload identity, such as `hello/HelloRequest`. |
+| Payload schema | Matching field names and compatible wire types; a familiar local type name alone is insufficient. |
+| Serialization mode | XLANG for interoperable typed binary calls. |
+| Contract settings | The complete interface descriptor used to derive the contract ID. |
 
-from aster import service, rpc, server_stream, wire_type
+A wire type name identifies a payload type. A **contract ID** identifies the
+service's canonical interface, including its methods, payload descriptions,
+and contract settings. Matching type names alone do not establish matching
+contracts. See [contract identity](/docs/concepts/contract-identity/) for what
+changes the ID and what matching IDs establish.
 
-@wire_type("billing/Invoice")
-@dataclass
-class Invoice:
-    invoice_id: str = ""
-    amount_cents: int = 0
-    currency: str = "USD"
+The proxy fetches the published contract and constructs types the local codec
+can encode. Your call looks like a JavaScript object call, but the proxy does
+not send arbitrary JSON as the RPC payload. The
+[serialization guide](/docs/concepts/serialization/) explains that distinction.
 
-@wire_type("billing/InvoiceQuery")
-@dataclass
-class InvoiceQuery:
-    customer_id: str = ""
-    status: str = ""
+## Define a typed client in another language
 
-@wire_type("billing/InvoiceEvent")
-@dataclass
-class InvoiceEvent:
-    invoice_id: str = ""
-    event_type: str = ""
-    timestamp: int = 0
+For a statically typed client, define equivalent request and response types
+with explicit wire names, and register or generate metadata as required by
+that binding. Keep service names, method names, call patterns, and contract
+settings aligned. Use the [language guides](/docs/bindings/) for the actual
+registration workflow.
 
-@service("BillingService", version=1)
-class BillingService:
+Take particular care with binary data, integer widths, collections, optional
+fields, and nested types. A language's default integer or byte-array mapping
+may differ from the wire type intended by another language. For example, Go
+binary payloads need the appropriate `fory:"type=bytes"` field tag. Give nested
+application types their own stable wire names.
 
-    @rpc
-    async def get_invoice(self, req: InvoiceQuery) -> Invoice:
-        return Invoice(
-            invoice_id="INV-001",
-            amount_cents=9999,
-            currency="USD",
-        )
+Use the default XLANG mode for these calls. Python's NATIVE and ROW codecs
+have language-specific constraints and are not substitutes for a cross-language
+payload contract.
 
-    @server_stream
-    async def watch_events(self, req: InvoiceQuery) -> AsyncIterator[InvoiceEvent]:
-        yield InvoiceEvent(
-            invoice_id="INV-001",
-            event_type="created",
-            timestamp=1700000000,
-        )
-```
+## Verify your application's pair
 
-Java is included in the public preview. This page does not yet include a runnable Java consumer for this service.
+Start with one representative request and assert every decoded response field.
+Then cover the cases your application uses: empty and large collections,
+boundary numeric values, nested/optional fields, errors, deadlines, and stream
+completion or cancellation. Test each intended producer/consumer direction.
 
-## Verifying compatibility
+Compare contract IDs using the supported contract tools, but keep execution
+checks too: matching interface descriptors do not prove matching application
+behavior or support for every value. Byte-for-byte equality is not a general
+requirement for ordinary XLANG payload interoperability; compare the decoded
+values and call behavior.
 
-### Canonical test vectors
+If the call fails before dispatch, check connectivity and admission first.
+For an unknown method, check the exact published name. For codec failures,
+check wire names, fields, and registration. A document-sync warning is not an
+RPC result; use the returned response or error to assess the call.
 
-To verify that two implementations are wire-compatible:
+## Next steps
 
-1. Generate the contract manifest from the Python service:
-   ```bash
-   aster contract gen --service myapp.services:BillingService --out manifest.json
-   ```
-
-2. The manifest contains the `contract_id` for each service. Compare this against the manifest generated by the other language's tooling.
-
-3. For byte-level verification, serialize a known object in one language and deserialize it in the other. Verify decoded fields and behavior; byte-for-byte equality is not a general XLANG compatibility requirement.
-
-### Field compatibility rules
-
-For two types to be wire-compatible across languages:
-
-- They must have the same `@wire_type` tag.
-- They must have fields with matching names and compatible types.
-- Field order does not matter (Fory XLANG uses named fields).
-- Supported primitive types: `str`, `int`, `float`, `bool`, `bytes`. These map to language-native equivalents.
-- Nested dataclasses must also have matching `@wire_type` tags.
-
-## Current status
-
-Rust, Python, TypeScript, Go, Java, and .NET implementations are included in the **0.3.893 public preview**. Published artifacts are available through [Forgejo](https://forge.emrul.dev/Aster/-/packages). Go public module/source availability remains a distribution gap; implementation qualification does not establish that `go get` works. This version was not published to PyPI or npmjs.org. Kotlin-specific APIs are not included in this language list.
-
-Start with the [quickstart](/docs/quickstart/python) or the [Python binding](/docs/bindings/python) and [TypeScript binding](/docs/bindings/typescript) references. Validate the combinations and field shapes your application uses before deployment.
+- [Choose a language](/docs/bindings/) for setup and binding-specific ownership.
+- [Hello service](/docs/examples/hello-service/) for a typed Python consumer.
+- [Trust model](/docs/concepts/trust-model/) before exposing real application data.

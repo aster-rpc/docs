@@ -1,0 +1,151 @@
+---
+title: Go client
+description: Connect Go clients, call all four RPC patterns, set deadlines, and manage session and stream ownership.
+slug: docs/bindings/go/client
+---
+
+`StartClient` creates a node and an RPC client. Calls use the native Rust
+connection and payload framing while Go supplies typed values and contexts.
+Use the [complete example](/docs/quickstart/go/)
+for setup and the `Request`, `Response`, and `service` declarations below.
+A client invokes handlers on another peer; registering a client-side contract
+supplies serialization and call metadata. It does not run those handlers locally.
+
+Begin with the unary Echo call. Streaming examples below show separate method
+shapes and require the named producer methods; the Echo project does not define
+`Uploads.upload` or `Chat.chat`.
+
+## Start, register, and connect
+
+```go
+client, err := aster.StartClient(ctx, aster.AsterConfig{
+    RelayMode: "disabled", BindAddr: "127.0.0.1:0",
+})
+if err != nil { return err }
+defer client.Close()
+if err := client.RegisterService(service); err != nil { return err }
+conn, err := client.ConnectTicket(ctx, ticket)
+if err != nil { return err }
+defer conn.Close()
+```
+
+Registering the service installs payload types and method idempotency metadata;
+it does not host the service. `Connect` accepts a `NodeAddr` instead of a
+ticket. Reuse the returned connection for subsequent calls and sessions.
+
+`StartClient` owns its node. `NewClient(node, codec, options...)` wraps an
+existing node and leaves that node's shutdown to its owner. Close active
+connections and clients before shutting down an externally owned node.
+
+## Unary calls and options
+
+```go
+callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+defer cancel()
+reply, err := aster.Call[Request, Response](callCtx, conn, "Echo", "hello",
+    &Request{Name: "Go"}, aster.WithMetadata("x-request-id", "example-1"))
+if err != nil { return err }
+fmt.Println(reply.Message)
+```
+
+| Setting | API |
+| --- | --- |
+| Deadline and cancellation | `context.Context` passed to the call |
+| Metadata | `WithMetadata(key, value)` |
+| Service version | `WithVersion(version)`, default 1 |
+| Session | `WithSession(id)` |
+| Retry eligibility | Registered method metadata or `WithIdempotent(bool)` |
+| Interceptors | `WithClientInterceptors` at startup, `WithInterceptors` per call |
+
+Use a context with a bounded deadline for network work. A canceled wait cannot
+establish that the remote operation had no effect.
+
+## Receive a server stream
+
+```go
+for reply, err := range aster.CallServerStream[Request, Response](
+    callCtx, conn, "Echo", "greet", &Request{Name: "Go"}) {
+    if err != nil { return err }
+    fmt.Println(reply.Message)
+}
+```
+
+The iterator yields responses as they arrive. Always check the accompanying
+error. Ending iteration early releases the call; use context cancellation to
+stop work from another goroutine.
+
+## Send a client stream
+
+`CallClientStream[Request, Response]` takes `iter.Seq[*Request]` and returns one
+response. For a service whose `upload` method accepts these payloads:
+
+```go
+requests := func(yield func(*Request) bool) {
+    for _, name := range []string{"one", "two"} {
+        if !yield(&Request{Name: name}) { return }
+    }
+}
+reply, err := aster.CallClientStream[Request, Response](
+    callCtx, conn, "Uploads", "upload", requests)
+```
+
+The method must exist in the server contract. Requests are sent as the
+iterator yields them. An empty client stream is rejected by the native client, so represent an empty batch explicitly in your application
+contract if needed.
+
+## Bidirectional calls
+
+`CallBidiStream` combines a request iterator with a response iterator. For
+interactive exchanges, `OpenBidiStream` returns a `BidiCall` with `Send`,
+`CloseSend`, and `Recv`:
+
+```go
+bidi, err := aster.OpenBidiStream[Request, Response](callCtx, conn, "Chat", "chat")
+if err != nil { return err }
+defer bidi.Close()
+if err := bidi.Send(&Request{Name: "hello"}); err != nil { return err }
+reply, err := bidi.Recv()
+if err != nil { return err }
+fmt.Println(reply.Message)
+if err := bidi.CloseSend(); err != nil { return err }
+```
+
+This fragment assumes a ping-pong `Chat.chat` handler. For general streams,
+receive concurrently with sending so neither side blocks on a full buffer.
+`CloseSend` ends request input; continue receiving until `io.EOF`. `Cancel`
+abandons an unfinished exchange. Always close the call owner.
+
+## Sessions
+
+Allocate IDs through `conn.NewSessionID()` and pass `WithSession(id)` to every
+call belonging to that session. Multiple sessions may share one connection.
+Do not invent, recycle, or move IDs to a different connection. Go does not
+provide Python's generated session context manager; keep the connection alive
+for the session and close it when abandoning its session state.
+
+## Admission and errors
+
+`ConnectTicket` dials RPC directly. It does not run Python's consumer-admission
+credential exchange. The server must use open development admission or have
+already admitted this authenticated peer. A protected gate refusal is not
+fixed by adding a role string to request metadata.
+
+Use `errors.As(err, &rpcErr)` with a `*aster.RpcError` to inspect RPC codes and
+`errors.Is` for sentinels such as `ErrRpcNotFound`. Native failures use
+`*IrohError` and native status sentinels. Handle context cancellation separately
+from application refusal; avoid matching human-readable error strings.
+
+Client interceptors provide retry and circuit-breaker policies for unary and
+client-streaming calls. Server-streaming and bidi calls run hooks without
+that retry loop. Retry only operations declared idempotent and keep retries
+within the original context budget.
+
+## Trace and resource ownership
+
+Pass the handler context into downstream calls to preserve tracing. Rust owns
+the metrics and exporter pipeline; application instruments use the same
+pipeline. Close streaming owners, connections, and the client deterministically.
+
+Continue with the [Go server](/docs/bindings/go/server/),
+[session model](/docs/concepts/session-scoped-services/), and
+[release compatibility](/docs/reference/compatibility/).

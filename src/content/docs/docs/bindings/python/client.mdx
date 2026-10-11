@@ -1,17 +1,29 @@
 ---
-title: AsterClient
+title: Python client
 description: AsterClient reference -- configuration resolution, admission handshake, typed clients, error handling.
 slug: "docs/bindings/python/client"
 ---
 
 import MermaidDiagram from '@components/MermaidDiagram.astro';
 
+`AsterClient` invokes methods hosted by another peer. It owns the consumer
+endpoint and RPC connections, performs consumer admission, and constructs
+method stubs from your service definition. Keep that context alive until its
+calls, streams, and sessions finish.
 
-# AsterClient reference
+## Before you start
 
-`AsterClient` is the consumer-side counterpart to `AsterServer`. It handles the admission handshake and RPC client construction behind a single async context manager, with all configuration driven by `AsterConfig` (environment variables or TOML file).
+Use the [Python first-service project](/docs/quickstart/python/) for installation
+and the shared `HelloService`/`HelloRequest` definitions. Set the producer's
+printed address and choose its admission mode. An open development producer
+accepts an empty credential request; a protected producer needs a provisioned
+consumer credential and deployment trust root.
 
-## Quick start
+The high-level client always performs consumer admission, including in open
+mode. A native Rust server that only offers direct RPC needs lower-level
+connection integration instead; see [dial a service](/docs/guides/dial-a-service/).
+
+## Connect and call
 
 ```python
 import asyncio
@@ -31,10 +43,16 @@ asyncio.run(main())
 ASTER_ENDPOINT_ADDR="<from producer output>" python consumer.py
 ```
 
-That's it in dev mode. `AsterClient` reads configuration from `ASTER_*` environment variables automatically.
-
+Run this fragment against the tutorial's open producer. Connection establishes
+admission and discovers services; `client(HelloService)` constructs typed stubs;
+the awaited call prints the producer's greeting. `AsterClient` reads `ASTER_*`
+configuration when no config object is supplied.
 
 ## Constructor
+
+This signature sketch uses application-supplied values. Optional overrides
+are only needed when configuration and identity loading do not supply them;
+`trusted_root_public_key` must contain the deployment's 32-byte public key.
 
 ```python
 AsterClient(
@@ -42,7 +60,7 @@ AsterClient(
     identity=".aster-identity",            # optional: path to identity file
     peer="billing-consumer",               # optional: select peer from identity file
     address="aster1...",                    # producer's address
-    root_pubkey=b'\x01\x02...',             # override: root public key
+    root_pubkey=trusted_root_public_key,             # override: root public key
     enrollment_credential_file="cred.json", # override: credential path
     channel_name="rpc",                     # optional (default: "rpc")
 )
@@ -61,32 +79,39 @@ async with AsterClient(identity=".aster-identity", peer="billing-consumer") as c
     ...
 ```
 
-If `identity` is omitted, `AsterClient` auto-detects `.aster-identity` in the current directory. If `peer` is omitted, it auto-selects the first `[[peers]]` entry with `role = "consumer"`. If no identity file is found, the client runs in dev mode.
+If `identity` is omitted, `AsterClient` auto-detects `.aster-identity` in the current directory. If `peer` is omitted, it auto-selects the first `[[peers]]` entry with `role = "consumer"`. Without an identity file, explicit configuration still applies. An empty
+credential only succeeds when the producer permits unenrolled consumers.
 
-### Configuration resolution (each field: inline kwarg > identity file > env var > TOML > default)
+### Configuration and wrapper resolution
+
+`AsterConfig` resolves defaults, TOML when loaded, and environment settings.
+The wrapper then applies destination arguments, selected identity fields, and
+explicit credential/root overrides. Node-key precedence differs: a configured
+`secret_key` takes precedence over the identity file's node key. See
+[configuration](/docs/reference/configuration/) for the per-input rules.
 
 | What | Source | Purpose |
 |------|--------|---------|
-| Producer address | `ASTER_ENDPOINT_ADDR` or `endpoint_addr=` | **Required.** Base64 NodeAddr or EndpointId hex string. |
+| Producer address | `ASTER_ENDPOINT_ADDR` or `address=` | **Required.** `aster1...` ticket, base64 NodeAddr, or EndpointId hex (with discovery). |
 | Enrollment credential | `.aster-identity` `[[peers]]` entry or `ASTER_ENROLLMENT_CREDENTIAL` | Signed token for admission. Not needed in dev mode. |
 | Root public key | `.aster-identity` `root_pubkey` field, `ASTER_ROOT_PUBKEY`, or `ASTER_ROOT_PUBKEY_FILE` | For validating the producer's root key in the admission response. |
 | Node identity | `.aster-identity` `[node].secret_key` or `ASTER_SECRET_KEY` | 32-byte key for stable EndpointId. Ephemeral if unset. |
 | IID token | `ASTER_ENROLLMENT_CREDENTIAL_IID` | Cloud Instance Identity Document (when credential requires IID). |
 
-### Dev mode vs production
+### Open and protected admission
 
 **Dev mode** (no `.aster-identity`, producer has `allow_all_consumers=True`):
 ```bash
 ASTER_ENDPOINT_ADDR="<addr>" python consumer.py
 ```
 
-**Production with identity file** (recommended):
+**Protected access with a provisioned identity file:**
 ```bash
 ASTER_ENDPOINT_ADDR="<addr>" python consumer.py
 # .aster-identity in cwd provides the credential automatically
 ```
 
-**Production in containers** (identity file at a custom path):
+**Optional identity path for a container:**
 ```bash
 ASTER_IDENTITY_FILE=/etc/aster/.aster-identity \
 ASTER_ENDPOINT_ADDR="<addr>" \
@@ -99,7 +124,6 @@ ASTER_ENDPOINT_ADDR="<addr>" \
 ASTER_ENROLLMENT_CREDENTIAL=consumer.token \
 python consumer.py
 ```
-
 
 ## Lifecycle
 
@@ -137,7 +161,6 @@ async with AsterClient() as c:
 
 Closes all RPC connections and the underlying QUIC endpoint. Safe to call multiple times.
 
-
 ## Getting an RPC client
 
 ```python
@@ -162,8 +185,13 @@ await c.client(
 )
 ```
 
-
 ## Making RPC calls
+
+Use unary RPC for a command and result, server streaming for incremental
+updates, client streaming for a sequence of inputs, and bidi for interactive
+exchange. The stream fragments below require the named service and payload
+definitions on both peers; they are API illustrations, not additional methods
+in the Hello project.
 
 Once you have a client, call methods directly:
 
@@ -206,6 +234,35 @@ async with channel:
     print(response.text)
 ```
 
+## Deadlines, cancellation, and sessions
+
+Per-call `timeout` is a relative budget in seconds. The Python client
+converts it to integer seconds with a minimum of one second. `metadata` adds
+request headers; `serialization` can select a supported payload mode.
+
+```python
+reply = await hello.say_hello(
+    HelloRequest(name="World"), timeout=5.0, metadata={"x-request-id": "example-1"}
+)
+```
+
+Use the request type declared by the service. An asyncio task cancellation stops
+the local wait; do not interpret it as rollback of a remote mutation. Close
+unfinished streams and the client deterministically.
+
+For a declared session-scoped `CounterService`, open the session asynchronously
+before entering its context:
+
+```python
+session = await c.open_session(service_cls=CounterService)
+async with session:
+    counter = await session.client(CounterService)
+    # Make this session's calls through counter.
+```
+
+Multiple sessions may share a connection. State belongs to the connection and
+session ID; it is not one instance per peer or per call stream. Keep the parent
+client alive for the session's lifetime.
 
 ## Connection reuse
 
@@ -216,7 +273,6 @@ async with AsterClient() as c:
     hello = await c.client(HelloService)    # opens connection to producer
     tasks = await c.client(TaskService)     # reuses same connection
 ```
-
 
 ## Error handling
 
@@ -263,8 +319,12 @@ except RpcError as e:
     print(f"RPC failed: {e.code} - {e.message}")
 ```
 
+## Protected consumer example
 
-## Complete production example
+This fragment requires the imported service definitions and a provisioned
+`billing-consumer` identity entry accepted by the producer. Provisioning and
+production operations are separate steps in the [trust model](/docs/concepts/trust-model/)
+and [operations guide](/docs/guides/operations/).
 
 ```python
 import asyncio
@@ -295,7 +355,12 @@ ASTER_ENDPOINT_ADDR="<producer addr>" \
 python consumer.py
 ```
 
-
 ## Sequence diagram
 
 <MermaidDiagram source={"sequenceDiagram\n    participant C as Consumer (AsterClient)\n    participant P as Producer (AsterServer)\n    rect rgba(120, 166, 255, 0.05)\n    Note over C,P: Admission phase\n    C->>P: QUIC connect (aster.consumer_admission ALPN)\n    C->>P: ConsumerAdmissionRequest (credential JSON)\n    P->>P: verify credential (or auto-admit)\n    P->>P: add peer to Gate 0 allowlist\n    P-->>C: ConsumerAdmissionResponse (services list)\n    end\n    rect rgba(97, 214, 194, 0.05)\n    Note over C,P: RPC phase\n    C->>P: QUIC connect (aster/1 ALPN)\n    C->>P: StreamHeader (service, method)\n    C->>P: Request frame\n    P-->>C: Response frame\n    P-->>C: OK trailer\n    end\n"} />
+
+## Next steps
+
+- [Python server](/docs/bindings/python/server/)
+- [Sessions](/docs/concepts/session-scoped-services/)
+- [Contract identity](/docs/concepts/contract-identity/)

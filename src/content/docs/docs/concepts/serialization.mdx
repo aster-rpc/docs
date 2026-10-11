@@ -1,9 +1,27 @@
 ---
 title: Serialization
 slug: "docs/concepts/serialization"
+description: "Distinguish payload schemas, canonical contract identity, and RPC envelopes when exchanging values across languages."
 ---
 
 Aster uses [Apache Fory](https://fory.apache.org/) for RPC payloads. The interoperable payload mode is XLANG. All bindings use a separate binary envelope, AEv1, for stream headers, call headers, and status trailers.
+
+For example, a Python worker and Rust operator must agree that a task contains
+a string identifier and binary content. A matching method name is insufficient:
+the receiving codec needs the same wire type and field schema.
+
+## Three encoding layers
+
+| Layer | Purpose | What must agree |
+| --- | --- | --- |
+| Canonical contract encoding | Derive the interface's content-addressed ID | Names, wire types, patterns, and contract settings |
+| Fory payload encoding | Carry the request or response values | Registered wire tags and compatible field types |
+| AEv1 envelope | Carry call routing, metadata, and status | Shared RPC protocol framing |
+
+A matching contract ID is a useful preflight check. Exercise representative
+values afterward, because runtime type mapping and payload support can differ
+between bindings. The canonical identity encoder is separate from ordinary
+Fory payload serialization; see [contract identity](/docs/concepts/contract-identity/).
 
 ## Cross-language payloads
 
@@ -13,9 +31,9 @@ Reference tracking is disabled, so applications must not rely on shared object i
 
 ## Binding-specific modes
 
-The Python codec also exposes NATIVE and ROW. These are Python-only modes in this preview, and should not be selected for cross-language services. NATIVE uses Fory's same-language format. ROW requires a dataclass root type and supports one root type per codec; it uses a row encoder for field-oriented access.
+The Python codec also exposes NATIVE and ROW. These are Python-only modes, and should not be selected for cross-language services. NATIVE uses Fory's same-language format. ROW requires a dataclass root type and supports one root type per codec; it uses a row encoder for field-oriented access.
 
-JSON serialization mode has been retired. Dynamic tools can accept JSON as user input and convert it to typed XLANG payloads using a contract schema. JSON input to a tool does not imply JSON on the RPC wire.
+The legacy JSON RPC serialization mode has been retired. The Rust HTTP transport separately supports opt-in browser JSON projections; see [HTTP serving](/docs/guides/http/). Dynamic tools can accept JSON as user input and convert it to typed XLANG payloads using a contract schema. JSON input to a tool does not imply JSON on the RPC wire.
 
 ## Wire type tags
 
@@ -32,6 +50,19 @@ class TaskAssignment:
     agent_id: str
     payload: bytes
 ```
+
+For the same `myapp.models/TaskAssignment` schema, the Rust definition uses
+`String` for `task_id` and `agent_id`, and `Vec<u8>` for `payload`. The contract
+derive maps `Vec<u8>` to binary, and the Fory payload derive needs
+`#[fory(bytes)]` on that field to encode binary consistently. See the
+[Rust payload guidance](/docs/bindings/rust/) when deriving `ForyStruct`.
+Python `bytes` is therefore a different wire
+choice from `list[int]`; a list of numeric values must not be substituted merely
+because both can represent byte-sized numbers. Register the identical wire tag
+on both definitions, then compare the generated contracts and exchange actual
+binary values. The [Rust service guide](/docs/bindings/rust/server/) explains
+its derives; the [cross-language example](/docs/examples/cross-language/)
+explains the checks and its execution limits.
 
 Tags are case-sensitive. Matching tags alone are insufficient: field names, types, and relevant contract settings must also agree. See [contract identity](/docs/concepts/contract-identity/) and the [TypeScript build setup](/docs/guides/typescript-build-setup/) for generated type information.
 

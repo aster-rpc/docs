@@ -2,7 +2,8 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: 'https://docs.aster.site',
+  site: 'https://sdk.getaster.now',
+  build: { assets: '_docs' },
   integrations: [starlight({
     title: 'Aster',
     description: 'Documentation for the Aster peer-to-peer application SDK preview.',
@@ -13,29 +14,33 @@ export default defineConfig({
     social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/aster-rpc/aster-rpc' }],
     sidebar: [
   {
-    "label": "Getting started",
+    "label": "Start here",
     "items": [
       {
         "label": "Introduction",
-        "slug": "index"
+        "slug": "docs"
       },
       {
-        "label": "Your first service",
+        "label": "Language and package compatibility",
+        "slug": "docs/reference/compatibility"
+      },
+      {
+        "label": "Your first Rust service",
+        "slug": "docs/quickstart/rust"
+      },
+      {
+        "label": "Your first Python or TypeScript service",
         "slug": "docs/quickstart/python"
       },
       {
-        "label": "MissionControl",
-        "slug": "docs/quickstart/mission-control"
-      },
-      {
-        "label": "What's next",
+        "label": "Next steps",
         "slug": "docs/quickstart/first-service"
       }
     ],
     "collapsed": false
   },
   {
-    "label": "Overview",
+    "label": "Understand Aster",
     "items": [
       {
         "label": "What is Aster?",
@@ -46,18 +51,20 @@ export default defineConfig({
         "slug": "docs/overview/why-aster"
       },
       {
-        "label": "Aster vs gRPC",
+        "label": "Aster and gRPC",
         "slug": "docs/overview/aster-vs-grpc"
-      }
-    ],
-    "collapsed": false
-  },
-  {
-    "label": "Concepts",
-    "items": [
+      },
       {
-        "label": "Identity-first transport",
+        "label": "Architecture",
+        "slug": "docs/reference/architecture"
+      },
+      {
+        "label": "Peer connectivity",
         "slug": "docs/concepts/transport"
+      },
+      {
+        "label": "Trust model",
+        "slug": "docs/concepts/trust-model"
       },
       {
         "label": "Contract identity",
@@ -79,20 +86,156 @@ export default defineConfig({
     "collapsed": true
   },
   {
-    "label": "Security",
+    "label": "Languages",
     "items": [
       {
-        "label": "Trust model",
-        "slug": "docs/concepts/trust-model"
+        "label": "Choose a language",
+        "slug": "docs/bindings"
+      },
+      {
+        "label": "Rust",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Overview",
+            "slug": "docs/bindings/rust"
+          },
+          {
+            "label": "Server",
+            "slug": "docs/bindings/rust/server"
+          },
+          {
+            "label": "Client",
+            "slug": "docs/bindings/rust/client"
+          },
+          {
+            "label": "First service",
+            "slug": "docs/quickstart/rust"
+          }
+        ]
+      },
+      {
+        "label": "Python",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Overview",
+            "slug": "docs/bindings/python"
+          },
+          {
+            "label": "Server",
+            "slug": "docs/bindings/python/server"
+          },
+          {
+            "label": "Client",
+            "slug": "docs/bindings/python/client"
+          },
+          {
+            "label": "First service",
+            "slug": "docs/quickstart/python"
+          }
+        ]
+      },
+      {
+        "label": "TypeScript",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Overview",
+            "slug": "docs/bindings/typescript"
+          },
+          {
+            "label": "Server",
+            "slug": "docs/bindings/typescript/server"
+          },
+          {
+            "label": "Client",
+            "slug": "docs/bindings/typescript/client"
+          },
+          {
+            "label": "First service",
+            "slug": "docs/quickstart/python"
+          }
+        ]
+      },
+      {
+        "label": "Go",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Overview",
+            "slug": "docs/bindings/go"
+          },
+          {
+            "label": "Server",
+            "slug": "docs/bindings/go/server"
+          },
+          {
+            "label": "Client",
+            "slug": "docs/bindings/go/client"
+          },
+          {
+            "label": "First service",
+            "slug": "docs/quickstart/go"
+          }
+        ]
+      },
+      {
+        "label": "Java and Kotlin",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Overview",
+            "slug": "docs/bindings/java"
+          },
+          {
+            "label": "Server",
+            "slug": "docs/bindings/java/server"
+          },
+          {
+            "label": "Client",
+            "slug": "docs/bindings/java/client"
+          },
+          {
+            "label": "First service",
+            "slug": "docs/quickstart/java"
+          },
+          {
+            "label": "Kotlin",
+            "slug": "docs/bindings/java/kotlin"
+          }
+        ]
+      },
+      {
+        "label": ".NET",
+        "collapsed": true,
+        "items": [
+          {
+            "label": "Overview",
+            "slug": "docs/bindings/dotnet"
+          },
+          {
+            "label": "Server",
+            "slug": "docs/bindings/dotnet/server"
+          },
+          {
+            "label": "Client",
+            "slug": "docs/bindings/dotnet/client"
+          },
+          {
+            "label": "First service",
+            "slug": "docs/quickstart/dotnet"
+          }
+        ]
       }
     ],
     "collapsed": true
   },
   {
-    "label": "Guides",
+    "label": "Build services",
     "items": [
       {
-        "label": "Defining services and types",
+        "label": "Services and types",
         "slug": "docs/guides/services"
       },
       {
@@ -108,46 +251,68 @@ export default defineConfig({
         "slug": "docs/guides/typescript-build-setup"
       },
       {
-        "label": "Observability",
-        "slug": "docs/guides/observability"
+        "label": "Baseline services",
+        "slug": "docs/guides/baseline-services"
+      },
+      {
+        "label": "HTTPS and WebTransport",
+        "slug": "docs/guides/http"
+      },
+      {
+        "label": "Expose an HTTP service",
+        "slug": "docs/guides/expose"
       },
       {
         "label": "AI agent integration (MCP)",
         "slug": "docs/guides/mcp-integration"
       },
       {
-        "label": "Porting from gRPC",
+        "label": "Port from gRPC",
         "slug": "docs/guides/port-from-grpc"
       }
     ],
     "collapsed": true
   },
   {
-    "label": "Language guides",
+    "label": "Data and coordination",
     "items": [
       {
-        "label": "Python",
-        "slug": "docs/bindings/python"
+        "label": "Blobs, documents, and gossip",
+        "slug": "docs/guides/data"
       },
       {
-        "label": "Python server",
-        "slug": "docs/bindings/python/server"
+        "label": "Replicated coordination",
+        "slug": "docs/guides/coordination"
       },
       {
-        "label": "Python client",
-        "slug": "docs/bindings/python/client"
+        "label": "Fenced leases",
+        "slug": "docs/guides/leases"
       },
       {
-        "label": "TypeScript",
-        "slug": "docs/bindings/typescript"
+        "label": "Topology and placement",
+        "slug": "docs/guides/topology"
       },
       {
-        "label": "TypeScript server",
-        "slug": "docs/bindings/typescript/server"
+        "label": "Sealed grants",
+        "slug": "docs/guides/sealed-grants"
+      }
+    ],
+    "collapsed": true
+  },
+  {
+    "label": "Operate",
+    "items": [
+      {
+        "label": "Operating a node",
+        "slug": "docs/guides/operations"
       },
       {
-        "label": "TypeScript client",
-        "slug": "docs/bindings/typescript/client"
+        "label": "Observability",
+        "slug": "docs/guides/observability"
+      },
+      {
+        "label": "Configuration",
+        "slug": "docs/reference/configuration"
       }
     ],
     "collapsed": true
@@ -155,6 +320,10 @@ export default defineConfig({
   {
     "label": "Examples",
     "items": [
+      {
+        "label": "MissionControl",
+        "slug": "docs/quickstart/mission-control"
+      },
       {
         "label": "Hello service",
         "slug": "docs/examples/hello-service"
@@ -164,7 +333,7 @@ export default defineConfig({
         "slug": "docs/examples/cross-language"
       },
       {
-        "label": "Data-heavy ROW mode",
+        "label": "Python ROW mode",
         "slug": "docs/examples/data-heavy-row-mode"
       }
     ],
@@ -174,24 +343,16 @@ export default defineConfig({
     "label": "Reference",
     "items": [
       {
-        "label": "API reference",
+        "label": "API index",
         "slug": "docs/reference/api"
       },
       {
-        "label": "Architecture",
-        "slug": "docs/reference/architecture"
-      },
-      {
-        "label": "Configuration",
-        "slug": "docs/reference/configuration"
-      },
-      {
-        "label": "CLI reference",
+        "label": "CLI",
         "slug": "docs/reference/cli"
       },
       {
         "label": "Python API",
-        "link": "https://docs.aster.site/api/python/aster/public.html"
+        "link": "https://sdk.getaster.now/api/python/aster/public.html"
       },
       {
         "label": "TypeScript API",

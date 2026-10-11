@@ -1,39 +1,42 @@
 ---
 title: Dial a service
-description: Three ways to connect to an Aster service -- typed client, dynamic shell, and raw transport.
+description: Call a service from Python or inspect its published schema with the CLI.
 slug: "docs/guides/dial-a-service"
 ---
 
 import MermaidDiagram from '@components/MermaidDiagram.astro';
 
 
-# Dial a service
 
-There are three ways to call an Aster service, depending on your situation:
+Use a typed Python client when an application knows the service contract, or the CLI shell when an operator needs to inspect a peer. Raw transport is an integration surface for tools that already manage the protocol and codecs.
+
+First run the [Python first service](/docs/quickstart/python/) and keep its producer running. The snippets use that shared service module and a real producer address in place of `aster1...`. For other languages, follow the corresponding [client reference](/docs/bindings/); the admission sequence below describes the Python high-level client.
 
 | Approach | When to use | Needs local types? |
 |----------|------------|-------------------|
 | **Typed client** | Application code, CI pipelines, production services | Yes |
 | **Aster shell** | Exploration, debugging, ad-hoc calls, ops | No |
-| **Raw transport** | Custom tooling, other-language FFI, testing | No |
+| **Raw transport** | Custom tooling and protocol testing | Payload schema and codec required |
 
 ## 1. Typed client (recommended for application code)
 
-The typed client gives you IDE autocomplete, type checking, and compile-time safety. You need the service's Python type definitions (the `@service`-decorated class and its request/response dataclasses).
+The typed client gives you IDE autocomplete and type checking where supported by your language tooling. You need the service's Python type definitions (the `@service`-decorated class and its request/response dataclasses).
 
 ```python
 import asyncio
 from aster import AsterClient
-from my_services import HelloService, HelloRequest
+from hello_service import HelloService, HelloRequest
 
 async def main():
-    async with AsterClient(address="aster1...") as c:
+    async with AsterClient() as c:
         hello = await c.client(HelloService)
         resp = await hello.say_hello(HelloRequest(name="World"))
         print(resp.message)  # Hello, World!
 
 asyncio.run(main())
 ```
+
+Save the block as `consumer.py` in the first-service project. Set `ASTER_ENDPOINT_ADDR` to the current producer ticket before running it.
 
 The consumer needs:
 - **The producer's endpoint address** -- printed on startup, or set via `ASTER_ENDPOINT_ADDR`
@@ -49,7 +52,7 @@ The consumer needs:
 
 ### Getting the types
 
-In production, service authors publish a client package containing the type definitions:
+Service authors can publish a client package containing the type definitions. The following package name is illustrative; use your service team's actual package:
 
 ```bash
 pip install billing-service-types  # published by the service team
@@ -81,14 +84,13 @@ ASTER_ENDPOINT_ADDR="<addr>" python consumer.py
 
 See [AsterClient](/docs/bindings/python/client) for the full Python API reference.
 
-
 ## 2. Aster shell (for exploration and debugging)
 
 The Aster shell connects to any peer and lets you browse services, inspect contracts, and invoke methods interactively -- without needing the Python type definitions locally.
 
 ```bash
 # Connect to a producer
-aster shell <endpoint-addr-b64>
+aster shell <endpoint-addr>
 
 # Or explore in demo mode (no live peer needed)
 aster shell --demo
@@ -104,7 +106,6 @@ producer:/$ cd services
 producer:/services$ ls
   Service         Methods    Version    Pattern
   HelloService          1         v1    shared
-  TaskRunner            3         v2    shared
 
 producer:/services$ cd HelloService
 producer:/services/HelloService$ ls
@@ -148,19 +149,9 @@ The shell reads the service contract from the producer's registry:
 - **Rich output** -- tables, syntax-highlighted JSON, progress bars
 - **Session subshell** -- `session Analytics` opens a dedicated session for session-scoped services
 
-### CLI equivalents
+### Scripted calls
 
-Every shell command has a non-interactive equivalent for scripting:
-
-```bash
-aster service ls <peer>
-aster service describe <peer> HelloService
-aster blob ls <peer>
-aster blob cat <peer> <hash>
-```
-
-See the [CLI reference](/docs/reference/cli) for command details.
-
+Use `aster call` for a non-interactive method invocation. The [CLI reference](/docs/reference/cli/) gives the command syntax and installation limits. Shell navigation and protocol-specific commands do not all have equivalent top-level subcommands.
 
 ## 3. Raw transport (for custom tooling)
 
@@ -168,9 +159,13 @@ For advanced use cases -- custom tooling, testing, or building clients in langua
 
 ```python
 from aster import IrohTransport, ForyCodec, SerializationMode
+from hello_service import HelloRequest, HelloResponse
 
-# Open a QUIC connection
-transport = IrohTransport(connection)
+# Use an existing admitted Iroh connection; register both payload types.
+codec = ForyCodec(
+    mode=SerializationMode.XLANG, types=[HelloRequest, HelloResponse],
+)
+transport = IrohTransport(connection, codec=codec)
 
 # Invoke by service and method name
 result = await transport.unary(
@@ -180,12 +175,11 @@ result = await transport.unary(
 )
 ```
 
-The raw transport still requires serializable request/response types. For truly schemaless invocation, use the shell or fetch the manifest and build payloads from the field definitions.
+This is an API fragment: an admitted `connection` to the matching server must already exist. This Python transport accepts a request object and encodes it with the configured codec; the lower-level native RPC API accepts bytes. Close the transport and its owning node when finished. The raw transport still requires serializable request/response types. For invocation without local type definitions, use the shell or fetch the manifest and construct compatible payload types from its field definitions.
 
+## Python high-level admission flow
 
-## Admission flow (all approaches)
-
-Regardless of which approach you use, every consumer goes through the same admission flow:
+Python `AsterClient` runs consumer admission before returning its high-level service client. Native Rust, Go, and .NET direct RPC connections do not universally run this Python discovery handshake; applications must configure the admission and attribute-verification path their server requires.
 
 <MermaidDiagram source={"sequenceDiagram\n    participant C as Consumer\n    participant P as Producer\n    C->>P: QUIC connect (aster.consumer_admission)\n    C->>P: credential (or empty for dev mode)\n    P->>P: verify / auto-admit\n    P-->>C: services list + registry ticket\n    C->>P: QUIC connect (aster/1)\n    C->>P: RPC calls\n"} />
 
@@ -196,10 +190,9 @@ The admission response gives the consumer:
 
 Even in dev mode (open gate), the admission handshake runs to discover services.
 
-
 ## Error handling
 
-All three approaches produce the same error types:
+Python callers can encounter the errors below. CLI tools report failures through their own output and exit behavior; other bindings use their own error types.
 
 | Error | Meaning |
 |-------|---------|
@@ -219,3 +212,14 @@ except RpcError as e:
     elif e.code == StatusCode.PERMISSION_DENIED:
         print("Not authorized for this method")
 ```
+
+## Verify a call and a denial
+
+A successful first-service call prints `Hello, World!`. If connection succeeds but the service lookup fails, compare its name, version, and contract metadata with the producer. If a method returns `PERMISSION_DENIED`, inspect the verified caller attributes and that method's requirement. A transport connection and a service listing do not prove method authorization.
+
+Before using protected credentials in an application, repeat the call with an intentionally unauthorized principal and confirm rejection at the server. A timeout leaves a mutating operation's outcome uncertain; reconcile application state before retrying it.
+
+## Next steps
+
+- [Contract identity](/docs/concepts/contract-identity/)
+- [Trust model](/docs/concepts/trust-model/)

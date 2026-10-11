@@ -1,25 +1,28 @@
 ---
 title: Porting from gRPC
 slug: "docs/guides/port-from-grpc"
+description: Translate gRPC contracts and review discovery, authorization, transport, and failure behavior before migrating callers.
 ---
 
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-This guide maps gRPC concepts to their Aster equivalents and walks through a migration step by step. The conceptual mappings are language-agnostic; code examples use Python.
+Use this guide to port a small [gRPC](https://grpc.io/) service while preserving its application behavior. For example, a Greeter with one unary call and one server stream can move to peer-addressed RPC, but its client discovery, credentials, deployment, and failure tests also need migration.
+
+Run the [Python first service](/docs/quickstart/python/) before adapting the fragments below. TypeScript needs its [metadata build](/docs/guides/typescript-build-setup/). These examples explain the translation; they are not a complete deployment or a wire-compatible adapter for existing gRPC clients.
 
 ## Conceptual mapping
 
 | gRPC | Aster | Notes |
 |------|-------|-------|
-| `.proto` file | `@service` / `@rpc` decorated class | No code generation step. Types are defined inline. |
+| `.proto` file | `@service` / `@rpc` decorated class | Python inspects annotations; TypeScript generates metadata; JVM uses processors. |
 | Protocol Buffers | Fory (XLANG mode) | Cross-language binary serialization with `@wire_type` tags. |
-| `protoc` code generator | Not needed | Aster is code-first. The class definition is the contract. |
+| `protoc` code generator | Binding-specific tooling | Code-first definitions still need the chosen binding's build and codec setup. |
 | gRPC channel | Aster endpoint (`NodeAddr`) | Identity-addressed, not hostname-addressed. |
-| HTTP/2 transport | QUIC transport | NAT-traversing, peer-to-peer capable. |
-| Load balancer | Endpoint address | Direct connections where possible; a reachable relay may be needed. |
-| TLS certificates | Endpoint identity (ed25519) | Built into the transport layer. No separate PKI. |
-| Service mesh sidecar | Not needed | Admission, auth, and observability are built in. |
+| HTTP/2 transport | QUIC transport | Direct, hole-punched, or relayed paths depend on reachability. |
+| Load balancer | Application service selection | An endpoint address identifies one peer; it does not choose among replicas. |
+| TLS certificates | Iroh endpoint identity | Peer authentication uses Ed25519; HTTP listeners still need TLS configuration. |
+| Service mesh sidecar | Review each responsibility | Configure admission, authorization, telemetry, routing, and operations for your deployment. |
 
 ## Step 1: Replace .proto definitions with decorated classes
 
@@ -133,19 +136,19 @@ class GreeterImpl implements GreeterService {
 import { WireType, Service, Rpc, ServerStream } from '@aster-rpc/aster';
 
 @WireType("myapp/HelloRequest")
-class HelloRequest {
+export class HelloRequest {
   name = "";
   constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
 }
 
 @WireType("myapp/HelloReply")
-class HelloReply {
+export class HelloReply {
   message = "";
   constructor(init?: Partial<HelloReply>) { if (init) Object.assign(this, init); }
 }
 
 @Service({ name: "Greeter", version: 1 })
-class Greeter {
+export class Greeter {
   @Rpc()
   async sayHello(req: HelloRequest): Promise<HelloReply> {
     return new HelloReply({ message: `Hello, ${req.name}!` });
@@ -191,7 +194,7 @@ async with AsterClient(address="aster1...") as client:
     print(resp.message)
 ```
 
-The client stub is generated at runtime from the `@service`-decorated class. There is no separate stub package to generate or distribute.
+Python constructs the client proxy at runtime from the decorated class. Distribute compatible service and payload definitions to typed callers; dynamic callers need the published manifest.
 
 ## Step 3: Replace gRPC server with `AsterServer`
 
@@ -214,10 +217,12 @@ server.wait_for_termination()
 ```python
 from aster import AsterServer
 
-async with AsterServer(services=[Greeter()]) as srv:
+async with AsterServer(services=[Greeter()], allow_all_consumers=True) as srv:
     print(f"Listening at: {srv.address}")
     await srv.serve()
 ```
+
+This server fragment explicitly permits unenrolled callers for development. Configure admission and method permissions before using real application data.
 
 ## What changes
 
@@ -225,13 +230,13 @@ async with AsterServer(services=[Greeter()]) as srv:
 The Python `@service` class defines the contract. TypeScript uses `aster-gen` to preserve type metadata before compilation.
 
 ### QUIC transport
-Aster runs over QUIC (RFC 9000) on UDP. Connections traverse NATs via relay servers without port forwarding or load balancer configuration.
+Aster runs over QUIC (RFC 9000) on UDP. Iroh can use direct paths, hole punching, and relays. Test reachability under the deployment's firewall and NAT policy; a relay does not provide application replica selection.
 
 ### Endpoint addressing
 Peers connect directly by identity. The `endpoint_addr` encodes the node's public key and relay hints, not a hostname. Connections are authenticated at the transport layer by the node's ed25519 identity key.
 
 ### Transport authentication
-QUIC connections are encrypted by default. The node's identity key provides mutual authentication. No certificate authorities or certificate rotation workflows.
+QUIC connections are encrypted by default. The node's identity key provides mutual authentication. Persist and protect that identity key, and plan credential and key rotation. HTTP integrations have a separate certificate policy.
 
 ## What stays the same
 
@@ -239,10 +244,10 @@ QUIC connections are encrypted by default. The node's identity key provides mutu
 Aster supports the same four patterns as gRPC: unary, server streaming, client streaming, and bidirectional streaming. Each pattern has binding-specific cancellation, buffering, and error behavior; verify those details when porting.
 
 ### Interceptors
-Aster has a middleware chain equivalent to gRPC interceptors. Built-in interceptors cover deadlines, retry, circuit breaking, auth, audit logging, metrics, and compression.
+Middleware availability and ordering differ by binding. Map each existing interceptor to an actual API in the chosen [binding reference](/docs/bindings/), including retries, deadlines, authentication, and telemetry. Do not infer equivalent behavior from matching names.
 
 ### Deadline propagation
-Method-level timeouts work the same way. Set a timeout on the method decorator or per-call. The `DeadlineInterceptor` propagates deadlines through the call chain.
+Port timeout behavior explicitly, including cancellation of handler work. Set a timeout on the method decorator or per-call. Use the binding's method and per-call deadline settings; the shared Rust dispatcher enforces the resulting deadline. Python also exposes a `DeadlineInterceptor`, while the TypeScript preview does not.
 
 ### Status codes
 Aster uses the same 17 status codes (0--16) as gRPC, with compatible semantics:
@@ -276,16 +281,27 @@ The difference: gRPC uses generated iterator types; Aster uses standard `AsyncIt
 
 ## Authentication migration
 
-gRPC authentication typically uses metadata headers and custom interceptors (or mTLS). Aster replaces this with a built-in trust model:
+Map gRPC metadata, interceptors, and mTLS to Aster's [trust model](/docs/concepts/trust-model/) in three separate steps:
 
-- **gRPC metadata/interceptors** become **enrollment credentials**. The operator signs credentials offline with a root key. Consumers present them during the admission handshake.
-- **mTLS certificates** become **endpoint identity keys**. Each node has an ed25519 keypair embedded in the QUIC transport. No separate certificate infrastructure.
+- **Caller identity and credentials:** choose a trusted signing root and enrollment credentials for your deployment. The Python high-level client presents credentials during consumer admission. Direct native RPC paths require their binding's verification/admission integration. Application metadata and non-authentication interceptor behavior need separate migration decisions.
+- **mTLS certificates** become **endpoint identity keys**. Each node has an ed25519 keypair embedded in the QUIC transport. Keep HTTP listener certificates separate from Iroh peer authentication.
 - **Authorization interceptors** become **capability requirements**. Declare `@service(requires=...)` or `@rpc(requires=...)` and the framework enforces them at the method dispatch layer.
 
 ## Deployment changes
 
-- **NAT traversal.** Peers behind NATs connect via relay servers without port forwarding. The relay is part of the transport, not a separate proxy.
+- **NAT traversal.** Test direct paths, hole punching, and relay access under the deployment's firewall policy. A reachable relay can carry traffic when a direct path is unavailable; network policy can still prevent connection.
 - **Peer-to-peer.** Once a direct path is established (via hole punching or local discovery), traffic flows directly between peers with no intermediary.
-- **Content-addressed contracts.** Each service version gets a deterministic `contract_id` (a hash of its interface). Consumers and producers can verify wire compatibility without running code.
-- **Built-in discovery.** The admission handshake returns the full service list. No separate service registry or DNS-based discovery required.
+- **Content-addressed contracts.** Each service version gets a deterministic `contract_id` (a hash of its interface). Compare the descriptor to check interface agreement, then execute representative payload and failure tests; a matching ID does not qualify codec behavior for every value.
+- **Discovery.** Python consumer admission returns service information. Replica selection, address distribution, and manifest availability remain deployment responsibilities.
 - **Relay availability.** Deployments still need a reachable network path and may depend on a public or self-hosted relay.
+
+## Verify the migrated behavior
+
+For this Greeter, a unary request for `World` should return `Hello, World!`; the stream should yield five greetings and end. Test an unknown method, a denied caller, a deadline during a stream, and a disconnected client. Confirm handlers release their resources on cancellation using the chosen binding's lifecycle rules.
+
+Keep the original gRPC endpoint available until callers have migrated. Aster Fory frames cannot be consumed by an unchanged gRPC client. Roll back application routing together with the matching client package and stored contract metadata.
+
+## Next steps
+
+- [Release compatibility](/docs/reference/compatibility/)
+- [Operating a node](/docs/guides/operations/)

@@ -1,0 +1,100 @@
+---
+title: Language and package compatibility
+description: Package delivery, shared behavior, and the boundaries of language parity.
+slug: docs/reference/compatibility
+---
+
+Aster is a public preview. Choose a binding by its installation workflow,
+required runtime, and supported APIs, then keep its wrapper and native library
+together. APIs may change before general availability. Development source can
+contain APIs absent from installed packages.
+
+Package availability, an exposed API, and a qualified application workflow are
+separate facts. Use the pinned installation in your language's tutorial and
+test the calls, admission policy, and cleanup your application needs.
+
+## Choose a language
+
+| Language | Delivery | Start here |
+| --- | --- | --- |
+| Rust | Source crates in the public Aster Cargo registry | [Rust](/docs/bindings/rust/) |
+| Python | Platform wheels in Forgejo packages | [Python](/docs/bindings/python/) |
+| TypeScript | Scoped packages in the Forgejo npm registry | [TypeScript](/docs/bindings/typescript/) |
+| Go | Binding exercised from source; public module delivery is not yet qualified | [Go](/docs/bindings/go/) |
+| Java | Forgejo Maven packages; JDK 25 runtime | [Java and Kotlin](/docs/bindings/java/) |
+| .NET | Forgejo NuGet packages; .NET 9 runtime | [.NET](/docs/bindings/dotnet/) |
+
+Kotlin uses the JVM runtime and KSP code generation. It is not a separately
+qualified language in the six-language RPC matrix. The C ABI is the native
+integration boundary for Go, Java, and .NET; it is not an additional typed SDK.
+
+Use the [public package catalog](https://forge.emrul.dev/Aster/-/packages)
+for artifacts. Python and TypeScript packages are delivered
+through Forgejo. Do not assume a package of the same name on PyPI or npmjs.org
+has the same version or native library.
+
+## What is shared
+
+The Rust engine owns RPC framing, dispatch, deadlines, method capability checks,
+and transport/data operations. Bindings adapt payload types, application
+handlers, cancellation, and resource ownership to their language runtimes.
+
+The six-language interoperability matrix exercises Rust, Python, TypeScript,
+Go, Java, and .NET producer/consumer combinations. Its RPC result does not
+qualify every payload, platform, helper, or deployment policy. The language
+quickstarts describe the exercised consumer workflows and their remaining
+qualification limits. A complete public per-platform matrix report is not
+provided here, so test your intended combination before depending on it.
+
+| Surface | Boundary to account for |
+| --- | --- |
+| RPC payloads | Use Fory XLANG and matching canonical contracts across languages |
+| Coordination | Clients wrap the Rust engine; hosting voters requires Rust |
+| HTTP exposure | Origin helpers and public edge hosting are distinct; the edge requires Rust |
+| Native Iroh access | Rust escape hatch; foreign handles have their binding's ownership rules |
+| Enrollment | High-level workflows differ; Rust applications wire their admission policy explicitly |
+| Serialization modes | Python NATIVE and ROW are not cross-language formats |
+| HTTP/WT listener, custody, Docs batch, provisioning, topology additions | Foreign-language parity is evolving; confirm each API and native ABI against your installed package |
+
+## Keep packages and native libraries together
+
+Pin SDK packages to the intended release and keep lockfiles. When using a
+separately loaded native library, use the matching release and target
+architecture. An ABI compatibility check does not make a newer wrapper work
+with missing native functions.
+
+The .NET binding requires the patched `Apache.Fory` package
+`1.7.6-aster.1` from Aster's NuGet feed. Rust uses unmodified `fory-core` and
+`fory-derive` `1.7.6` from crates.io. Do not substitute one dependency policy
+for the other.
+
+## JVM code generation and session cleanup
+
+The Java APT and Kotlin KSP generators emit working unary dispatchers;
+streaming bodies are unimplemented stubs. All four patterns work through the
+runtime's explicit dispatcher SPI. The [JVM tutorial](/docs/quickstart/java/)
+combines generated unary dispatch with a tested server-stream dispatcher.
+
+`ClientSession.close()` is a no-op. Closing the peer connection
+reaps remote session state; a local try-with-resources block alone does not.
+
+## Standalone TypeScript producer
+
+A pending native serve operation alone does not keep the Node.js process alive. The [quickstart](/docs/quickstart/python/#run-a-producer)
+includes an explicitly owned timer, cleared at shutdown. Use that lifecycle
+when testing a standalone producer; a successful `start()` message does not
+prove that the process is still serving.
+
+## Validate your contract
+
+Match service name, version, method names, streaming patterns, wire types,
+defaults, and capability requirements. Compare `contract_id` before testing
+representative payloads between your chosen producers and consumers. Include
+empty values, binary data, optional fields, and cancellation behavior.
+
+Tutorials marked as drafts still need a clean consumer walkthrough. Generated
+API references may describe a different build; compare their signatures with
+the package you installed.
+
+Continue with [contract identity](/docs/concepts/contract-identity/),
+[serialization](/docs/concepts/serialization/), or [operations](/docs/guides/operations/).

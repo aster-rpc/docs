@@ -1,0 +1,109 @@
+---
+title: Blobs, documents, and gossip
+description: Choose the data protocol that fits your application's consistency and delivery needs.
+slug: docs/guides/data
+---
+
+An application often needs to move both content and news about that content.
+For a catalog publisher, the catalog file is content, the entry saying which
+catalog is current is shared state, and a notification that it changed is a
+live message. Aster provides a different tool for each job:
+
+- A **blob** is an immutable sequence of bytes identified by its content hash.
+  Use it for a file, model, image, or other content you want to fetch and verify.
+- A **document** replicates signed key/value entries that refer to content.
+  Use it when peers need a shared view of entries that can converge after
+  independent updates. An entry can arrive before its content does.
+- **Gossip** distributes live messages among peers in a topic. Use it to
+  announce an event; applications need another mechanism to recover messages
+  missed while a peer was offline.
+
+An Aster node can serve these [Iroh](https://iroh.computer/) data protocols
+alongside RPC under one endpoint identity.
+
+## Before you start
+
+Use the [Rust first service](/docs/quickstart/rust/) to establish node ownership and shutdown. The examples below are API fragments using an existing `node`; they show local storage operations, not a complete two-peer transfer. For remote exchange, keep both node owners alive and exchange reachable peer addresses as well as document capabilities.
+
+## Choose a protocol
+
+| Need | Use | Application responsibility |
+| --- | --- | --- |
+| Transfer immutable bytes by hash | Blobs | Retention, provider selection, and application validation |
+| Replicate signed key/value entries | Documents | Author and namespace permissions, conflicts, and content availability |
+| Broadcast live messages within a topic | Gossip | Membership policy and recovery of missed messages |
+| Make a typed request and receive a result | RPC | Deadlines, idempotency, and method authorization |
+| Serialize competing mutations | [Coordination](/docs/guides/coordination/) | Durable client identity, acknowledgements, and resource fencing |
+
+Document replication is eventual. It is unsuitable as the sole serialization
+point for an exclusive writer or compare-and-swap decision.
+
+## Start with blobs
+
+In Rust, the default crate features include blobs and documents. With an
+existing `node`, store bytes and retrieve them by hash:
+
+```rust
+let hash = node.blobs().add_bytes(b"hello".to_vec()).await?;
+let bytes = node.blobs().read_to_bytes(&hash).await?;
+assert_eq!(bytes, b"hello");
+```
+
+A hash identifies content; it does not identify a reachable provider or prove
+that an application should trust the content. Supply peer address information
+when fetching from another node and validate the application-level format.
+
+Retention is separate from content addressing. The store's garbage collector
+uses retained roots, including tags and document live-content references.
+Preserve content through the retention API appropriate to your operation.
+Do not assume that computing or remembering a hash keeps its bytes resident.
+
+## Write a document entry
+
+A document entry associates an author and key with content. Using an existing
+Rust node:
+
+```rust
+let docs = node.docs();
+let doc = docs.create().await?;
+let author = docs.default_author().await?;
+doc.set_bytes(&author, b"greeting".to_vec(), b"hello".to_vec()).await?;
+```
+
+Share a read capability with readers and a write capability only with writers.
+Treat write tickets and namespace secrets as credentials. Use
+[sealed grants](/docs/guides/sealed-grants/) when distributing capabilities
+through replicated policy records.
+
+## Distinguish metadata from content
+
+Receiving an entry does not imply that its blob is locally complete. Subscribe
+to document events and track content readiness before consuming the bytes.
+Sync completion, content readiness, and application readiness are separate
+conditions.
+
+An explicit sync request can be coalesced with an existing sync to that peer.
+Do not assume each request produces its own distinguishable completion event.
+Check the result you need: the entry and its complete content.
+
+For code that verifies content before retaining it, check whether the installed package exposes temporary custody and verified named imports. Package and native-library support must agree; see [compatibility](/docs/reference/compatibility/).
+
+## Use gossip for live updates
+
+Peers join a topic and exchange messages through its overlay. Bootstrap
+addresses help peers connect. A topic identifier is not a substitute for an
+admission policy, and a gossip message is not a durable log entry. Persist
+recoverable state in a document or another store, then use gossip to announce
+that it changed.
+
+## Verify a two-peer exchange
+
+For a worker publishing a catalog, first store its bytes and retain the content on worker A. Write its reference into a document and share a read capability with worker B. Start synchronization with A using its reachable address. At B, observe the entry, wait separately for the referenced content to become available, then read and validate the catalog.
+
+Expect the local blob example to read back `hello`. In the remote scenario, entry arrival may precede readable bytes. Disconnect A after metadata arrives to exercise that gap; B should wait or report unavailable content rather than announce a ready catalog. A missing provider address is a reachability problem, while a missing document capability is an access problem. Keep retained content and document owners until consumers have finished.
+
+## Next steps
+
+- [Service discovery](/docs/concepts/discovery/)
+- [Sealed grants](/docs/guides/sealed-grants/)
+- [Storage and shutdown](/docs/guides/operations/)

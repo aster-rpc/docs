@@ -1,0 +1,202 @@
+---
+title: Your first Go service
+description: Build a pinned public-source Go client and server with the released native runtime.
+slug: docs/quickstart/go
+---
+
+This example starts a Go server and client on your machine. One call returns
+a greeting; a second call returns three greetings as a stream. Both use a real
+peer connection over loopback, so you can learn registration, calls, and cleanup
+without setting up another machine.
+
+You need Go 1.25 or newer, CGO, and a C compiler. The walkthrough was run
+with Go 1.27.1 on Apple Silicon macOS.
+
+This guide uses a pinned public source archive and a local module replacement.
+The Go wrapper calls the shared Rust engine through a native library; the
+source archive supplies its matching C header. Use these inputs together.
+The short vanity-module `go get` installation is not a validated alternative
+to this setup.
+
+The example uses ephemeral identities and open admission on loopback with
+relays disabled. Configure [identity and authorization](/docs/concepts/trust-model/)
+before using it outside development.
+
+## Get the source and native runtime
+
+Install Go and a C compiler. Create an empty working directory, then download
+and extract [hello-go.zip](/examples/hello-go.zip) there. Keep `hello-go` beside
+`sdk` and `native` created by these commands:
+
+```sh
+curl -fL https://codeload.github.com/aster-rpc/aster-rpc/tar.gz/54631e28d90e23264ee3e9affa9f026999505414 -o sdk.tar.gz
+mkdir sdk
+tar -xzf sdk.tar.gz --strip-components=1 -C sdk
+curl -fLO https://forge.emrul.dev/api/packages/Aster/generic/aster-ffi/0.3.893/libaster_transport_ffi-osx-arm64.tar.gz
+curl -fLO https://forge.emrul.dev/api/packages/Aster/generic/aster-ffi/0.3.893/FFI-SHA256SUMS
+awk '$2 == "libaster_transport_ffi-osx-arm64.tar.gz"' FFI-SHA256SUMS | shasum -a 256 -c -
+mkdir native
+tar -xzf libaster_transport_ffi-osx-arm64.tar.gz -C native
+```
+
+These commands target Apple Silicon macOS. For another platform, select its
+matching native release and compiler/linker settings. Keep the C header from
+this pinned source with the native library; current `main` can require a newer
+ABI. The native archive contains the library; the source archive supplies the header.
+
+Your working directory should now contain:
+
+```text
+workspace/
+├── hello-go/
+│   └── main.go            # Your application
+├── sdk/
+│   ├── bindings/go/       # Go module used by the local replacement
+│   └── ffi/aster_ffi.h    # Native interface declarations
+└── native/
+    └── libaster_transport_ffi.dylib
+```
+
+## Configure the consumer module
+
+Inside `hello-go`, run:
+
+```sh
+go mod init example.com/aster-hello
+go mod edit -require=sdk.getaster.now/go@v0.0.0
+go mod edit -replace=sdk.getaster.now/go=../sdk/bindings/go
+export CGO_ENABLED=1
+export CGO_CFLAGS="-I$(pwd)/../sdk/ffi"
+export CGO_LDFLAGS="-L$(pwd)/../native -laster_transport_ffi -Wl,-rpath,$(pwd)/../native"
+go run -mod=mod .
+```
+
+Use a working path without spaces for these CGO flags. `v0.0.0` is a local
+replacement placeholder; it does not identify a published module version.
+Save the resulting `go.mod` and `go.sum` with the project.
+
+Expected output:
+
+```text
+Hello, Go!
+Hello, Go! (1)
+Hello, Go! (2)
+Hello, Go! (3)
+```
+
+## Define, serve, and call
+
+`Request` and `Response` carry application data. `NewService` attaches two
+handlers to the `Echo` service. The server hosts those handlers; the client
+registers their types locally so it can encode calls. The ticket connects the
+two roles.
+
+The complete `main.go` is:
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	aster "sdk.getaster.now/go"
+	"time"
+)
+
+type Request struct{ Name string }
+
+func (Request) AsterWireType() string { return "hello/Request" }
+
+type Response struct{ Message string }
+
+func (Response) AsterWireType() string { return "hello/Response" }
+
+func run() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	service := aster.NewService("Echo", 1,
+		aster.Unary("hello", func(ctx context.Context, req *Request) (*Response, error) {
+			return &Response{Message: "Hello, " + req.Name + "!"}, nil
+		}),
+		aster.ServerStream("greet", func(ctx context.Context, req *Request, send func(*Response) error) error {
+			for i := 0; i < 3; i++ {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := send(&Response{Message: fmt.Sprintf("Hello, %s! (%d)", req.Name, i+1)}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	)
+	cfg := aster.AsterConfig{RelayMode: "disabled", BindAddr: "127.0.0.1:0", AllowAllConsumers: true}
+	server, err := aster.StartServer(ctx, aster.ServerOptions{Config: cfg, Services: []*aster.Service{service}})
+	if err != nil {
+		return err
+	}
+	defer server.Close()
+	client, err := aster.StartClient(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := client.RegisterService(service); err != nil {
+		return err
+	}
+	ticket, err := server.Ticket(ctx)
+	if err != nil {
+		return err
+	}
+	conn, err := client.ConnectTicket(ctx, ticket)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	reply, err := aster.Call[Request, Response](ctx, conn, "Echo", "hello", &Request{Name: "Go"})
+	if err != nil {
+		return err
+	}
+	fmt.Println(reply.Message)
+	for reply, err := range aster.CallServerStream[Request, Response](ctx, conn, "Echo", "greet", &Request{Name: "Go"}) {
+		if err != nil {
+			return err
+		}
+		fmt.Println(reply.Message)
+	}
+	return nil
+}
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+```
+
+`StartServer` serves immediately. `RegisterService` configures the client codec
+and call metadata without hosting the service. One connection handles the
+unary call and response stream. The context bounds the example's total work;
+resource owners close in reverse order.
+
+## Separate processes and protected access
+
+Share the payload/service definitions. The producer prints `server.Ticket(ctx)`
+and stays alive until its application shutdown signal. The consumer passes the
+received ticket to `ConnectTicket`. A non-local deployment needs appropriate
+bind and relay configuration.
+
+Go dials RPC directly; it does not perform the high-level consumer
+credential handshake. For protected deployments, admit verified peer IDs and
+configure method attributes in your application. An address ticket alone does
+not grant access.
+
+## Troubleshooting
+
+- Missing `aster_ffi.h`: check `CGO_CFLAGS` and the pinned source directory.
+- Missing native symbols/library: check `CGO_LDFLAGS`, architecture, and release match.
+- ABI mismatch: do not combine current Go source with an older native release.
+- Contract rejection for `[]byte`: use the `fory:"type=bytes"` field tag for binary data.
+- A connection refusal from a protected server requires peer admission.
+
+Continue with the [Go server](/docs/bindings/go/server/),
+[Go client](/docs/bindings/go/client/), and [release compatibility](/docs/reference/compatibility/).

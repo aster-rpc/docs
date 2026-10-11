@@ -1,9 +1,24 @@
 ---
 title: Why Aster?
 slug: "docs/overview/why-aster"
+description: "Match changing-network and stateful-service requirements to Aster mechanisms and operational costs."
 ---
 
 Aster addresses two application requirements: connecting services across networks where addresses can change, and deciding which calls an authenticated peer may make. For example, a remote agent can submit status updates while an operator has permission to issue commands.
+
+## Requirements and operating conditions
+
+| Your requirement | Aster mechanism | What to evaluate |
+| --- | --- | --- |
+| Reach workers whose addresses change | Persistent endpoint identity, direct paths, relay fallback | Preserve keys and test reachability through your firewalls and relays |
+| Give operators and workers different permissions | Admission policy and method requirements | Issue credentials, verify attributes, and test denied calls |
+| Keep state across a conversation | Session-scoped service instances | Bound memory and define recovery after disconnection |
+| Exchange immutable job inputs | Content-addressed blobs | Retain content and ensure a provider remains reachable |
+| Protect a single-writer operation | Coordination and fenced leases | Run the authority and enforce the fence at the resource |
+
+These mechanisms reduce application plumbing, but each introduces an operating
+responsibility. Compare a representative end-to-end workflow with your existing
+network and RPC stack before adopting the preview.
 
 ## Connect using a persistent identity
 
@@ -19,7 +34,8 @@ Development defaults are permissive. Configure and review the [trust model](/doc
 
 ## Define services in application code
 
-Service definitions use language-native APIs. Python, for example, declares RPC methods with decorators:
+Service definitions use language-native APIs. The following API fragment shows Python decorators; `TaskAssignment` and
+`TaskAck` are application wire types, and the body is intentionally omitted:
 
 ```python
 @service(name="TaskManager", version=1)
@@ -41,4 +57,4 @@ Session state does not survive connection loss automatically. Applications that 
 
 ## Evaluate the preview
 
-Aster 0.3.893 is a public preview with Rust, Python, TypeScript, Go, Java, and .NET surfaces. Evaluate its package delivery, network behavior, and API stability against your deployment requirements. [Aster vs gRPC](/docs/overview/aster-vs-grpc/) describes the deployment choices; [your first service](/docs/quickstart/python/) shows the Python and TypeScript workflow.
+Aster is a public preview with Rust, Python, TypeScript, Go, Java, and .NET surfaces. Evaluate its package delivery, network behavior, and API stability against your deployment requirements. [Aster vs gRPC](/docs/overview/aster-vs-grpc/) describes the deployment choices; [your first service](/docs/quickstart/python/) shows the Python and TypeScript workflow.

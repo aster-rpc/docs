@@ -1,26 +1,35 @@
 ---
 title: TypeScript
 slug: "docs/bindings/typescript"
+description: "Install the TypeScript preview and generate metadata for typed services."
 ---
-
 
 import { Badge } from '@astrojs/starlight/components';
 
 <Badge text="TypeScript binding" variant="success" />
 
-## Status
+The TypeScript binding lets a Node.js application host decorated service
+methods and call remote peers with typed clients, dynamic proxies, and async
+streams. TypeScript supplies schemas and handlers; the NAPI-RS addon connects
+them to the shared Rust transport and dispatcher.
 
-The TypeScript binding is part of the 0.3.893 public preview. It uses NAPI-RS for the shared Rust transport and TypeScript for the RPC framework.
+Use it when adding peer RPC to a Node application. Defining a typed service
+requires generated wire metadata as well as compiled JavaScript, so follow the
+[complete first-service project](/docs/quickstart/python/) through its build
+and run steps before adapting the references.
+
+## Runtime prerequisites
 
 **Packages:**
+
 - `@aster-rpc/transport` — NAPI-RS native addon (Iroh P2P transport)
-- `@aster-rpc/aster` — Pure TypeScript RPC framework
+- `@aster-rpc/aster` — TypeScript service API and runtime adapters
 
 **Runtime requirement:** Node.js 20+. The examples use the TypeScript compiler before running JavaScript.
 
 ## Install
 
-Aster **0.3.893 is a public preview**. This version is available from [Forgejo packages](https://forge.emrul.dev/Aster/-/packages); it was not published to npmjs.org.
+The TypeScript preview is distributed through [Forgejo packages](https://forge.emrul.dev/Aster/-/packages). Configure the Aster scope before installing it.
 
 Add this scope mapping to your project's `.npmrc`:
 
@@ -37,104 +46,44 @@ npm install --save-dev typescript@^5 @types/node
 
 The `@aster-rpc/transport` native addon is included as a dependency and auto-selects the correct binary for your platform.
 
-## Quick example
+## Build a service
 
-A producer hosts a service over QUIC; a consumer connects by address.
+Follow the [TypeScript quickstart](/docs/quickstart/python/) to define a service,
+run `aster-gen`, compile with `tsc`, and call it from a typed consumer.
+[TypeScript build setup](/docs/guides/typescript-build-setup/) explains compiler
+settings and generated metadata discovery.
 
-```typescript
-// service.ts
-import { Service, Rpc, WireType, AsterServer } from '@aster-rpc/aster';
+| Client choice | Contract source | Use it when |
+| --- | --- | --- |
+| `client.client(ServiceClass)` | Shared class plus generated metadata | Both sides share definitions and you want named typed methods |
+| `client.proxy("ServiceName")` | Producer manifest discovered at runtime | You inspect services dynamically and supply your own application interface |
 
-@WireType("hello/HelloRequest")
-export class HelloRequest {
-  name = "";
-  constructor(init?: Partial<HelloRequest>) { if (init) Object.assign(this, init); }
-}
+The dynamic proxy declaration has no application method names, so it needs an
+application interface assertion. That assertion supplies compiler information. The runtime manifest
+and codec still determine what gets serialized. Use matching wire names and
+payload representations regardless of which client surface you choose.
 
-@WireType("hello/HelloResponse")
-export class HelloResponse {
-  message = "";
-  constructor(init?: Partial<HelloResponse>) { if (init) Object.assign(this, init); }
-}
+## Runtime and data APIs
 
-@Service({ name: "Hello", version: 1 })
-export class HelloService {
-  @Rpc()
-  async sayHello(req: HelloRequest): Promise<HelloResponse> {
-    return new HelloResponse({ message: `Hello, ${req.name}!` });
-  }
-}
+TypeScript decorators and generated metadata describe services and payloads.
+Handlers run in the JavaScript runtime. The NAPI-RS bridge connects them to
+Rust dispatch, which owns framing, method lookup, sessions, deadlines, and
+capability checks.
 
-// Producer (run `npx aster-gen` first)
-const server = new AsterServer({
-  services: [new HelloService()],
-});
-await server.start();
-console.log("Producer ready at:", server.address);
-await server.serve();
-```
+| Area | TypeScript surface |
+| --- | --- |
+| Services | Standard decorators and generated type metadata |
+| Calls | Typed clients or dynamic proxies over published contracts |
+| Streaming | Async iterators and generators |
+| Sessions | Calls share a connection-scoped session ID |
+| Data | Node APIs for blobs, documents, and gossip |
+| Coordination | Wrappers over the durable Rust client engine |
+| Telemetry | Shared Rust pipeline with language-level helpers |
 
-```typescript
-// consumer.ts
-import { AsterClientWrapper } from '@aster-rpc/aster';
-
-const client = new AsterClientWrapper({
-  address: process.env.ASTER_ENDPOINT_ADDR!,
-});
-await client.connect();
-
-// The dynamic proxy builds XLANG requests from the published contract --
-// methods are discovered from the producer's published contract.
-const hello = await client.proxy("Hello");
-const reply = await hello.sayHello({ name: "TypeScript" });
-console.log(reply.message); // "Hello, TypeScript!"
-
-await client.close();
-```
-
-For full type safety on the consumer side, generate a typed client with `aster contract gen-client <address> --lang typescript --out ./clients` and import it instead of using `client.proxy()`.
-
-## Architecture
-
-```
-@aster-rpc/aster          Pure TypeScript — decorators, client, server,
-                          interceptors, framing, protocol types
-        |
-@aster-rpc/transport      NAPI-RS native addon — IrohNode, QUIC streams,
-        |                  blobs, docs, gossip
-        |
-aster_transport_core       Shared Rust crate (same as Python binding)
-        |
-iroh crates                QUIC, blobs, docs, gossip
-```
-
-The TypeScript binding uses the same Rust core as the Python binding. Python and TypeScript services can interoperate when their wire tags, field types, method names, and serialization modes agree.
-
-## Key design decisions
-
-- **TC39 Stage 3 decorators** (`@Service`, `@Rpc`, `@ServerStream`, etc.) — compiles to standard JS, no runtime decorator support needed.
-- **Proxy-based client stubs** — `createClient(ServiceClass, transport)` returns a typed client with full IDE autocompletion.
-- **AsyncIterator/AsyncGenerator** for all streaming patterns.
-- **Fory XLANG** (`@apache-fory/core`) for cross-language wire compatibility with Python.
-- **NAPI-RS** for the native transport layer — same pattern as SWC, Prisma, Turbo.
-
-## Features
-
-The binding includes these RPC features:
-
-| Feature | Status |
-|---------|--------|
-| All 4 streaming patterns (unary, server, client, bidi) | Done |
-| TC39 decorators (@Service, @Rpc, @ServerStream, etc.) | Done |
-| Proxy-based typed client stubs | Done |
-| Interceptors (deadline, retry, rate limiting, and others) | Available |
-| Contract identity (BLAKE3 hashing) | Done |
-| Session-scoped services (CALL/CANCEL multiplexing) | Done |
-| Structured logging (JSON/text, correlation, masking) | Done |
-| Health endpoints (/healthz, /readyz, /metrics) | Done |
-| Configuration (env vars, TOML) | Done |
-| IrohTransport (QUIC) | Done |
-| LocalTransport (in-process testing) | Done |
+Use explicit wire tags and generated metadata for XLANG payloads. Interoperability
+requires agreement with the other binding's contract, not just an equivalent
+TypeScript class shape. See [release compatibility](/docs/reference/compatibility/)
+for package and feature boundaries.
 
 ## Further reading
 

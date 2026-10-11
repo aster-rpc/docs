@@ -1,22 +1,26 @@
 ---
 title: Python
 slug: "docs/bindings/python"
+description: "Install the Python preview and use its asynchronous RPC API."
 ---
-
 
 import { Badge } from '@astrojs/starlight/components';
 
 <Badge text="Python binding" variant="note" />
 
-The Python binding wraps Aster’s shared Rust engine through PyO3 and exposes an async RPC framework.
+The Python binding lets an `asyncio` application host service methods and call
+methods on other peers. Python defines payloads and handlers; the PyO3 bridge
+connects them to Aster's shared Rust transport and dispatcher.
 
-## Status
-
-The Python binding is included in the 0.3.893 public preview. The installation below uses its published Forgejo wheel.
+Use it for an asynchronous worker, control service, or consumer that needs
+peer calls and optional data exchange. Start with one request and response,
+then add streaming or private session state as the application needs them.
+The [first-service project](/docs/quickstart/python/) supplies matching producer
+and consumer files.
 
 ## Installation
 
-Aster **0.3.893 is a public preview**. This version is distributed through [Forgejo packages](https://forge.emrul.dev/Aster/-/packages), rather than PyPI. Choose the wheel for your platform from the [Python artifact list](https://forge.emrul.dev/api/v1/packages/Aster/generic/aster-python/0.3.893/files): Apple Silicon macOS, Linux x86-64 or ARM64 (glibc 2.34+), or Windows x86-64.
+The Python preview is distributed through [Forgejo packages](https://forge.emrul.dev/Aster/-/packages), rather than PyPI. Choose the wheel for your platform from the [Python artifact list](https://forge.emrul.dev/api/v1/packages/Aster/generic/aster-python/0.3.893/files): Apple Silicon macOS, Linux x86-64 or ARM64 (glibc 2.34+), or Windows x86-64.
 
 For example, on Apple Silicon macOS:
 
@@ -27,6 +31,9 @@ python -m pip install https://forge.emrul.dev/api/packages/Aster/generic/aster-p
 Use the corresponding wheel URL on other platforms. Python 3.9–3.13 is required. The optional CLI is independently versioned; see the [CLI reference](/docs/reference/cli) for installation and its validation limits.
 
 ## Quick example
+
+This in-process demonstration uses a real peer connection and explicitly allows
+unenrolled consumers. Use it with test data.
 
 ```python
 import asyncio
@@ -49,7 +56,7 @@ class HelloService:
 
 async def main():
     # Producer
-    async with AsterServer(services=[HelloService()]) as srv:
+    async with AsterServer(services=[HelloService()], allow_all_consumers=True) as srv:
         addr = srv.address
 
         # Consumer
@@ -60,6 +67,22 @@ async def main():
 
 asyncio.run(main())
 ```
+
+The server context owns the producer node. The client context owns the
+consumer endpoint and connections. The inner context closes first, so no call
+outlives its endpoint. The expected result is `Hello, World!`.
+
+For cross-language services, add explicit [wire names](/docs/concepts/contract-identity/)
+and match the remote contract; the local Python example shares one definition.
+
+## Choose the next task
+
+| Task | Continue with |
+| --- | --- |
+| Register handlers and control server lifetime | [Python server](/docs/bindings/python/server/) |
+| Connect, call, and handle refusals | [Python client](/docs/bindings/python/client/) |
+| Define payloads, streams, and service scope | [Service guide](/docs/guides/define-a-service/) |
+| Configure identity and protected access | [Trust model](/docs/concepts/trust-model/) |
 
 ## API surface
 
@@ -118,48 +141,27 @@ Built-in middleware chain:
 | `RetryInterceptor` | Automatic retry for idempotent methods. |
 | `CircuitBreakerInterceptor` | Circuit breaker pattern for failing endpoints. |
 | `AuditLogInterceptor` | Log all RPC calls for audit. |
-| `CapabilityInterceptor` | Enforce `requires` capability checks. |
+| `CapabilityInterceptor` | Application/local-transport capability policy; network dispatch also enforces requirements in Rust. |
 
 ### Sessions
 
 | API | Purpose |
 |-----|---------|
-| `@service(scoped="session")` | Producer-side: per-connection service instances (the class `__init__` receives a `peer` argument). |
-| `await client.session("ServiceName")` | Consumer-side: open a multiplexed session against a session-scoped service. Returns a `SessionProxyClient` whose method calls share one bidi stream. |
+| `@service(scoped="session")` | Producer-side: one service instance per connection-scoped session ID (the class `__init__` receives a `peer` argument). |
+| `await client.session("ServiceName")` | Consumer-side: open a session-scoped service through `SessionProxyClient`. Calls carry the same connection-scoped session ID on separate streams. |
 
-## Architecture
+## Runtime and data APIs
 
-The Python binding is structured as a four-layer stack:
+Python defines service schemas and runs application handlers on `asyncio`.
+The PyO3 bridge exposes Rust operations as awaitables. The shared Rust dispatcher
+owns framing, method lookup, deadline enforcement, sessions, and capability
+checks; Python interceptors add application policy around handlers.
 
-```
-Python (aster package)        Pure Python: decorators, server, client,
-                              codec, interceptors, trust, sessions
-        |
-        | PyO3
-        v
-Rust bindings (PyO3)          Thin wrappers exposing async methods
-                              as Python awaitables
-        |
-        v
-core crate (Rust)             Authoritative backend: all transport
-                              logic, QUIC endpoint management
-        |
-        v
-iroh crates                   iroh, iroh-blobs, iroh-docs, iroh-gossip
-```
-
-The PyO3 module starts a single shared Tokio runtime. All async Rust functions are bridged to Python awaitables via `pyo3-async-runtimes`. The Python layer uses `asyncio` for all async operations.
-
-## Testing
-
-Tests use `pytest` with `pytest-asyncio` (auto mode):
-
-```bash
-pip install pytest pytest-asyncio pytest-timeout
-pytest tests/python/ -v --timeout=30
-```
-
-The `conftest.py` provides fixtures for common setups: `node`, `node_pair`, `endpoint_pair`.
+The SDK also exposes node identity, blobs, documents, gossip, leases, topology,
+and coordination clients. Start with the [data guide](/docs/guides/data/) and
+[coordination guide](/docs/guides/coordination/) for their behavior and ownership
+boundaries. Check the [release matrix](/docs/reference/compatibility/) before
+using newer parity helpers from a source example.
 
 ## Further reading
 

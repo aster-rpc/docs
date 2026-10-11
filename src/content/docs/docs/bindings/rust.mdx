@@ -1,0 +1,142 @@
+---
+title: Rust
+description: Install the Rust facade, choose Cargo features, and use Aster's native stack.
+slug: docs/bindings/rust
+---
+
+Rust is Aster's native SDK. The `aster` crate provides nodes, typed RPC, data
+protocols, leases, topology, and optional replicated coordination. Language
+bindings call this same Rust implementation.
+
+Start with [your first Rust service](/docs/quickstart/rust/) for a complete
+program. This page explains dependency and feature choices for an application.
+
+## Install the preview
+
+Use Rust 1.96.0, the toolchain used by the SDK, and the public Aster Cargo
+registry. Reading packages requires no token. Add `.cargo/config.toml`:
+
+```toml
+[registries.aster]
+index = "sparse+https://forge.emrul.dev/api/packages/Aster/cargo/"
+```
+
+Add these dependencies when defining RPC payloads:
+
+```toml
+[dependencies]
+aster = { version = "=0.3.893", registry = "aster", features = ["rpc"] }
+fory-core = "=1.7.6"
+fory-derive = "=1.7.6"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+[Apache Fory](https://fory.apache.org/) derive macros resolve `::fory_core`, so
+both Fory crates must be direct dependencies when deriving payload types.
+Commit your application's `Cargo.lock`. Keep directly listed Aster crates on
+the same release and upgrade deliberately; this is a public preview.
+
+## Application workflow
+
+Define payloads and a service trait, implement the handlers, then register the
+generated adapter on a server. A caller uses the generated client over a live
+node connection. The [server reference](/docs/bindings/rust/server/) explains
+owned versus existing-node integration; the [client reference](/docs/bindings/rust/client/)
+explains connection reuse and stream owners.
+
+Start with unary RPC for a command and result. Enable data or coordination
+features only when the application needs content transfer, replicated state,
+or serialized decisions; each adds its own permissions and resource lifetime.
+
+## Choose features
+
+| Feature | Default | Purpose |
+| --- | --- | --- |
+| `blobs`, `docs`, `gossip` | Yes | Content storage, replicated documents, and gossip |
+| `attestation` | Yes | Ownership attestation helpers |
+| `rpc` | No | Service macros, dispatch, clients, and Fory payloads |
+| `hooks` | No | Admission API; also enable hooks in node configuration |
+| `discovery` | No | Local discovery API |
+| `otel` | No | Shared OpenTelemetry integration |
+| `health` | No | Health and Prometheus listener; enables `otel` |
+| `coordination-client` | No | Durable coordination clients and wire contracts |
+| `coordination` | No | Host a coordination voter or learner |
+| `expose` | No | Relay an existing HTTP service over Aster |
+| `expose-edge` | No | Public reverse-proxy edge; enables `expose` |
+
+HTTPS and WebTransport RPC use the separate `aster-transport-salvo` crate.
+See [HTTP serving](/docs/guides/http/). Binding-support and test-only features
+are internal implementation surfaces.
+
+## Define wire types
+
+Derive `ForyStruct` for serialization and `aster::AsterType` for the contract.
+Assign explicit wire names shared by every language implementation:
+
+```rust
+use fory_derive::ForyStruct;
+
+#[derive(ForyStruct, aster::AsterType, Debug, Default, Clone)]
+#[aster(wire = "files/Chunk")]
+pub struct Chunk {
+    #[fory(bytes)]
+    pub data: Vec<u8>,
+}
+```
+
+`Vec<u8>` needs `#[fory(bytes)]` to represent a binary field. Use
+`#[aster(uint8_list)]` only when the intended wire type is a list of integers.
+Nested payload types also need both derives. Matching wire names, field types,
+defaults, and method settings is necessary for [contract identity](/docs/concepts/contract-identity/).
+
+## Call patterns and policies
+
+A service trait can declare all four RPC patterns. The macro generates the
+server adapter and client methods:
+
+| Pattern | Service method form |
+| --- | --- |
+| Unary | Request value → one response |
+| Server stream | `#[rpc(server_stream)]`, request and `ResponseSink<Response>` |
+| Client stream | `#[rpc(client_stream)]`, `RequestStream<Request>` → one response |
+| Bidirectional | `#[rpc(bidi_stream)]`, request stream and response sink |
+
+Generated request-stream client methods take a `Vec<Request>`.
+Use `RpcConnection::client_stream_open` or `bidi_open` when requests must be
+sent incrementally.
+
+Connection policies such as deadlines, retry, and circuit breaking wrap unary
+calls in the Rust facade; do not assume they wrap streaming calls. Retry only
+operations whose application behavior is idempotent. A dropped response does
+not establish that the server performed no work.
+
+Use `#[rpc(requires = require_role("operator"))]` to require a role on a
+method, importing `require_role` from `aster::rpc`. Populate the server's
+`AttributeStore` from verified admission logic. Methods without a requirement
+remain callable by admitted peers; see the [trust model](/docs/concepts/trust-model/).
+
+## Access the native stack
+
+`aster::native` reexports Aster's exact [Iroh](https://iroh.computer/) and Fory
+dependencies. `node.native_endpoint()`, `node.blobs().native_store()`,
+`node.docs().native_docs()`, and `node.gossip().native_gossip()` return handles
+to the live objects owned by the node.
+
+The node owns shutdown and protocol routing. Do not close these native handles,
+replace the endpoint's ALPN set, or run a competing accept loop. Tag raw blob
+writes that must remain resident; they share the node's garbage collector.
+
+If a macro or extra feature requires a direct Iroh or Salvo dependency, use
+the exact version from the Aster registry. A same-named crates.io or Git
+dependency has a different Cargo identity and its types may not interoperate.
+The direct Salvo macro dependency is `=1.0.3` from `aster`.
+Ordinary consumers do not need workspace patch blocks or fork manifests.
+
+## Next steps
+
+- [First service](/docs/quickstart/rust/)
+- [Rust server](/docs/bindings/rust/server/)
+- [Rust client](/docs/bindings/rust/client/)
+
+- [Language and release compatibility](/docs/reference/compatibility/)
+- [Operating a node](/docs/guides/operations/)

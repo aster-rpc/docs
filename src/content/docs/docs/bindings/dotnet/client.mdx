@@ -1,0 +1,141 @@
+---
+title: .NET client
+description: Call Aster from C# with typed payloads, async streams, deadlines, sessions, and deterministic cleanup.
+slug: docs/bindings/dotnet/client
+---
+
+`AsterClient` owns a client node; each `RpcConnection` carries calls to one
+peer. Follow the [.NET tutorial](/docs/quickstart/dotnet/)
+first for package/native setup and the shared payload definitions. Register
+the payload contract, connect to the producer's ticket, make calls, then dispose
+streams and connections before disposing the client.
+
+Use unary calls for a command and result. Async streams let you process records
+as they arrive; sessions preserve private server state across multiple calls.
+The upload and chat fragments require matching methods on the producer and
+illustrate APIs rather than extending the Echo project unchanged.
+
+## Start and connect
+
+```csharp
+await using var client = await AsterClient.StartAsync(new AsterConfig {
+    BindAddr = "127.0.0.1:0", RelayMode = "disabled"
+});
+client.RegisterTypes(service);
+await using var connection = await client.ConnectAsync(await server.TicketAsync());
+```
+
+Here `service` and `server` come from the tutorial. For a separate process,
+pass its received `AsterTicket` or a `NodeAddrInfo` to `ConnectAsync`.
+`RegisterTypes(service)` installs payload types; it does not host handlers.
+Reuse a connection for multiple calls.
+
+`AsterClient.Create(node, codec, interceptors)` wraps a caller-owned node.
+Dispose the client and its connections before that node. Keep the default
+Fory settings for cross-language interoperability.
+
+## Unary calls and options
+
+```csharp
+using var cancellation = new CancellationTokenSource();
+var reply = await connection.UnaryAsync<Request, Response>("Echo", "hello",
+    new Request { Name = ".NET" },
+    new CallOptions { Deadline = TimeSpan.FromSeconds(5), Idempotent = true },
+    cancellation.Token);
+Console.WriteLine(reply.Message);
+```
+
+| `CallOptions` property | Purpose |
+| --- | --- |
+| `Deadline` | Relative duration enforced by the native call |
+| `Metadata` | Key/value pairs in the request header |
+| `SessionId` | Connection-scoped session; zero is the shared-service path |
+| `Version` | Service version, default 1 |
+| `Idempotent` | Whether retrying this operation is safe |
+
+The `CancellationToken` is separate from `CallOptions`. Use it to abandon work
+when the application no longer needs the result. `Task.WaitAsync` alone only
+bounds the caller's wait; it is not a substitute for a native deadline or
+passing a cancellation token to the RPC.
+
+## Server streaming
+
+```csharp
+await foreach (var reply in connection.ServerStreamAsync<Request, Response>(
+    "Echo", "greet", new Request { Name = ".NET" },
+    new CallOptions { Deadline = TimeSpan.FromSeconds(10) }, cancellation.Token)) {
+    Console.WriteLine(reply.Message);
+}
+```
+
+Responses arrive incrementally. `await foreach` disposes its enumerator on
+normal completion, exception, or `break`; do not leave manually created
+enumerators undisposed. A terminal RPC failure is raised during enumeration.
+
+## Client and bidirectional streams
+
+`ClientStreamAsync<TReq,TResp>` accepts `IAsyncEnumerable<TReq>` and returns
+one response. An overload also accepts `IEnumerable<TReq>`. `BidiStreamAsync`
+accepts an asynchronous request sequence and returns an asynchronous response
+sequence. These methods require matching method patterns in the server contract.
+
+```csharp
+// requests is an IAsyncEnumerable<Request> owned by this operation.
+var result = await connection.ClientStreamAsync<Request, Response>(
+    "Uploads", "upload", requests, cancellationToken: cancellation.Token);
+
+await foreach (var response in connection.BidiStreamAsync<Request, Response>(
+    "Chat", "chat", requests, cancellationToken: cancellation.Token)) {
+    Console.WriteLine(response.Message);
+}
+```
+
+The two calls above are separate usage fragments; provide a fresh or reusable
+request sequence for each. Request production must observe cancellation.
+An empty client stream is not accepted by the native client.
+Bidi sends and receives concurrently; end the request sequence to half-close
+input, then continue consuming responses until the call finishes.
+
+## Sessions
+
+Allocate a fresh ID with `connection.NextSessionId()` and set
+`new CallOptions { SessionId = id }` on every call for that session. IDs are
+scoped to the connection and must not be reused after a session ends.
+Multiple sessions can share one connection. This API does not expose Python's
+session context manager; disposing a connection releases its remote session
+state as the peer observes connection closure.
+
+## Admission, errors, and retry
+
+`ConnectAsync` establishes an RPC connection directly. The .NET wrapper does
+not automatically exchange consumer credentials. Protected servers
+must already admit the client's stable peer ID. A public address ticket does
+not grant application authorization.
+
+Catch `RpcError` and inspect its `Code` (`StatusCode`) for remote application
+failures, such as `NotFound`, `PermissionDenied`, or `DeadlineExceeded`.
+Local cancellation can throw `OperationCanceledException`; native setup and
+transport failures are distinct from an application status. Avoid matching
+message strings.
+
+Client interceptors can add retry and circuit breaking. Unary and
+client-streaming calls use the policy execution path; streaming response calls
+run hooks without transparent replay. Set `Idempotent` only when the server
+operation really is safe to repeat. A timeout or cancellation does not prove
+that a mutation was rolled back.
+
+## Ownership and tracing
+
+Use `await using` for connections and clients. A wrapper returned by
+`WithInterceptors` shares the underlying connection; closing it closes that
+connection, so treat wrappers as views of one owned resource. Keep the client
+alive while any call is in progress.
+
+The native observability pipeline records RPC metrics and traces. Use the
+binding's tracing helpers to continue application context and its logging
+bridge for `Microsoft.Extensions.Logging`; do not start a second exporter
+pipeline for the same SDK events.
+
+Continue with the [.NET server](/docs/bindings/dotnet/server/),
+[session model](/docs/concepts/session-scoped-services/), and
+[observability](/docs/guides/observability/).

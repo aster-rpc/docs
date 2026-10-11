@@ -1,33 +1,60 @@
 ---
+import './diagram.css';
 const { kind = 'contract' } = Astro.props;
 ---
-<figure class="docs-diagram not-content">
+<figure class="aster-diagram docs-diagram not-content">
   {kind === 'contract' ? (
-    <svg viewBox="0 0 640 350" role="img" aria-labelledby="contract-title contract-desc">
-      <title id="contract-title">Contract and type references</title>
-      <desc id="contract-desc">A ServiceContract references three MethodDefs. The first method references two TypeDefs. Each references a FieldDef, and one field references another TypeDef.</desc>
-      <g class="edges"><path d="M320 57 V86 H100 V104 M320 86 V104 M320 86 H540 V104 M100 146 V170 H60 V187 M100 170 H225 V187 M60 229 V262 M225 229 V262 M225 304 H424"/></g>
-      <g class="boxes"><rect x="241" y="15" width="158" height="42" rx="5"/><rect x="30" y="104" width="140" height="42" rx="5"/><rect x="250" y="104" width="140" height="42" rx="5"/><rect x="470" y="104" width="140" height="42" rx="5"/><rect x="5" y="187" width="110" height="42" rx="5"/><rect x="170" y="187" width="110" height="42" rx="5"/><rect x="5" y="262" width="110" height="42" rx="5"/><rect x="170" y="262" width="110" height="42" rx="5"/><rect x="424" y="283" width="110" height="42" rx="5"/></g>
-      <g class="labels"><text x="320" y="42">ServiceContract</text><text x="100" y="131">MethodDef</text><text x="320" y="131">MethodDef</text><text x="540" y="131">MethodDef</text><text x="60" y="214">TypeDef</text><text x="225" y="214">TypeDef</text><text x="60" y="289">FieldDef</text><text x="225" y="289">FieldDef</text><text x="479" y="310">TypeDef</text></g>
+    <svg class="contract-diagram" viewBox="0 0 360 470" role="img" aria-labelledby="contract-title contract-desc">
+      <title id="contract-title">How a contract references its types</title>
+      <desc id="contract-desc">A ServiceContract references a MethodDef. That method references request and response TypeDefs. Each type contains a FieldDef. The response field references a nested TypeDef below it. Every arrow points from the definition to the definition it references.</desc>
+      <defs><marker id="contract-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="var(--sl-color-accent)" /></marker></defs>
+      <g class="edges" marker-end="url(#contract-arrow)">
+        <path d="M180 58 V96" />
+        <path d="M180 140 V164 H86 V202" />
+        <path d="M180 164 H274 V202" />
+        <path d="M86 260 V300" />
+        <path d="M274 260 V300" />
+        <path d="M274 344 V398" />
+      </g>
+      <g class="boxes">
+        <rect x="100" y="14" width="160" height="44" rx="6" />
+        <rect x="110" y="96" width="140" height="44" rx="6" />
+        <rect x="16" y="202" width="140" height="58" rx="6" />
+        <rect x="204" y="202" width="140" height="58" rx="6" />
+        <rect x="16" y="300" width="140" height="44" rx="6" />
+        <rect x="204" y="300" width="140" height="44" rx="6" />
+        <rect x="204" y="398" width="140" height="58" rx="6" />
+      </g>
+      <g class="labels">
+        <text x="180" y="42">ServiceContract</text>
+        <text x="180" y="124">MethodDef</text>
+        <text class="small" x="86" y="246">Request type</text>
+        <text class="small" x="274" y="246">Response type</text>
+        <text x="86" y="224">TypeDef</text><text x="274" y="224">TypeDef</text>
+        <text x="86" y="328">FieldDef</text><text x="274" y="328">FieldDef</text>
+        <text class="small" x="274" y="443">Field's nested type</text>
+        <text x="274" y="420">TypeDef</text>
+      </g>
     </svg>
   ) : (
     <svg viewBox="0 0 640 310" role="img" aria-labelledby="mission-title mission-desc">
       <title id="mission-title">MissionControl services and callers</title>
-      <desc id="mission-desc">Agent 1, Agent 2, and the Operator CLI call the shared MissionControl and per-connection AgentSession services. Agents can use a relay when required for connectivity.</desc>
+      <desc id="mission-desc">Agent 1, Agent 2, and the Operator CLI call the shared MissionControl and session-scoped AgentSession services. Agents can use a relay when required for connectivity.</desc>
       <g class="edges"><path d="M165 62 H220 V113 H310 M165 139 H220 M165 219 H245 V205 H310 M220 139 V205 H310 M245 219 V113 H310"/><path class="hint" d="M88 260 V245 H25 V62 H35 M25 139 H35"/></g>
-      <g class="boxes"><rect x="35" y="40" width="130" height="44" rx="5"/><rect x="35" y="117" width="130" height="44" rx="5"/><rect x="35" y="197" width="130" height="44" rx="5"/><rect x="310" y="75" width="280" height="76" rx="5"/><rect x="310" y="168" width="280" height="76" rx="5"/><rect x="35" y="260" width="130" height="36" rx="5"/></g>
-      <g class="labels"><text x="100" y="67">Agent 1</text><text x="100" y="144">Agent 2</text><text x="100" y="224">Operator CLI</text><text x="450" y="103">MissionControl · shared</text><text class="small" x="450" y="130">status · logs · metrics</text><text x="450" y="195">AgentSession · per connection</text><text class="small" x="450" y="221">register · heartbeat · commands</text><text class="small" x="100" y="283">Relay fallback</text></g>
+      <g class="boxes"><rect x="35" y="40" width="130" height="44" rx="6"/><rect x="35" y="117" width="130" height="44" rx="6"/><rect x="35" y="197" width="130" height="44" rx="6"/><rect x="310" y="75" width="280" height="76" rx="6"/><rect x="310" y="168" width="280" height="76" rx="6"/><rect x="35" y="260" width="130" height="36" rx="6"/></g>
+      <g class="labels"><text x="100" y="67">Agent 1</text><text x="100" y="144">Agent 2</text><text x="100" y="224">Operator CLI</text><text x="450" y="103">MissionControl · shared</text><text class="small" x="450" y="130">status · logs · metrics</text><text x="450" y="195">AgentSession · per session</text><text class="small" x="450" y="221">register · commands</text><text class="small" x="100" y="283">Relay fallback</text></g>
     </svg>
   )}
-  <figcaption>{kind === 'contract' ? 'Each definition references the types it uses. Changes propagate through those references.' : 'Shared services and agent sessions use the same peer-to-peer transport.'}</figcaption>
+  <figcaption>{kind === 'contract' ? 'One method and selected fields are shown. Arrows follow references; changing a referenced type changes the contract identity.' : 'Shared services and agent sessions use the same peer-to-peer transport.'}</figcaption>
 </figure>
 <style>
-  .docs-diagram { margin: 1.5rem 0; border: 1px solid var(--sl-color-gray-5); border-radius: 6px; padding: 1rem; background: var(--sl-color-gray-6); overflow-x: auto; }
+  .docs-diagram { margin: 1.5rem 0; overflow-x: auto; }
   svg { display: block; width: 100%; min-width: 400px; }
+  .contract-diagram { min-width: 0; max-width: 540px; margin-inline: auto; }
   .edges path { fill: none; stroke: var(--sl-color-accent); stroke-width: 1.5; }
   .edges .hint { stroke-dasharray: 4 4; stroke: var(--sl-color-gray-3); }
-  .boxes rect { fill: var(--sl-color-black); stroke: var(--sl-color-gray-4); }
-  .labels text { fill: var(--sl-color-white); font: 12px var(--sl-font-mono); text-anchor: middle; }
-  .labels .small { font-size: 10px; fill: var(--sl-color-gray-2); }
-  figcaption { margin-top: .5rem; color: var(--sl-color-gray-2); font-size: .75rem; line-height: 1.6; }
+  .boxes rect { fill: var(--sl-color-accent); fill-opacity: .12; stroke: var(--sl-color-accent); }
+  .labels text { fill: var(--sl-color-white); font: 14px var(--sl-font); text-anchor: middle; }
+  .labels .small { font-size: 12px; fill: var(--sl-color-gray-2); }
+  figcaption { margin-top: .5rem; color: var(--sl-color-gray-2); font-size: .85rem; line-height: 1.6; }
 </style>

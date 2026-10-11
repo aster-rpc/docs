@@ -1,125 +1,146 @@
 ---
 title: Trust model
-slug: "docs/concepts/trust-model"
+description: Separate authenticated transport, admission policy, and method authorization.
+slug: docs/concepts/trust-model
 ---
 
+Aster separates peer identity from application permission. [Iroh](https://iroh.computer/)
+authenticates the endpoint key on a QUIC connection. Your admission policy decides
+whether that peer may connect, and method requirements decide which operations
+an admitted caller may invoke.
 
-Aster includes a built-in trust model rooted in an offline ed25519 keypair. The model covers connection admission, credential verification, service-level authorization, and method-level capabilities -- without requiring external infrastructure like certificate authorities, OAuth providers, or API key management services.
+These protections depend on configuration. A service started with permissive
+admission is reachable without deployment enrollment. Rust and the higher-level
+bindings do not provide identical enrollment workflows.
 
-## Four-gate authorization
+## Authorization stages
 
-Aster evaluates authorization through four sequential gates. Each gate runs at a different point in the connection and call lifecycle. A request must pass all applicable gates; no gate substitutes for another.
+| Stage | Decision | Implementation boundary |
+| --- | --- | --- |
+| Gate 0: connection admission | May this peer connect on this protocol? | Endpoint hooks and the application's admission policy |
+| Gate 1: credential admission | Does this credential establish deployment membership? | High-level enrollment workflow or application verification |
+| Gate 2: service policy | May this caller start or use this service/session? | Service authorization and application interceptors |
+| Gate 3: method capabilities | Do the caller's verified attributes satisfy this method? | Shared Rust dispatcher checks declared requirements |
 
-### Gate 0: Connection-level admission
+These are separate checks. Authenticating a key does not grant a role, and
+opening a session does not remove a method's capability requirement.
 
-When an incoming QUIC connection arrives, iroh's `EndpointHooks` inspect the handshake. The endpoint checks whether the remote `EndpointId` is already in the admitted set.
+## Trace an allowed and a denied call
 
-- If the remote endpoint is already admitted, the connection proceeds.
-- If the remote endpoint is not admitted, only admission ALPNs (`aster.producer_admission`, `aster.consumer_admission`) are accepted. Non-admission ALPNs are rejected until the endpoint presents a valid credential.
+Suppose a worker may report status and an operator may cancel jobs. The
+application independently configures the deployment root, verifies enrollment
+material, and attaches verified attributes to the authenticated caller.
+`cancel_job` requires the operator role.
 
-This gate prevents unauthenticated endpoints from reaching any service. The only thing an unknown endpoint can do is present a credential.
+| Request | Decision | Result |
+| --- | --- | --- |
+| Enrolled operator with verified `aster.role=operator` calls `cancel_job` | Admission and method requirement succeed | Dispatcher invokes the handler |
+| Enrolled worker with verified `aster.role=worker` calls `cancel_job` | Method requirement fails | Dispatcher rejects the call before the handler |
+| Caller supplies `aster.role=operator` in unverified metadata | Metadata establishes no authority | Policy must not promote it into verified attributes |
+| Peer presents a credential signed by an untrusted root | Enrollment verification fails | Protected admission rejects it |
 
-### Gate 1: Credential admission
+A denied-call test should also confirm that the handler did not mutate state.
+Use separate test peers and repeat the test over each enabled transport.
 
-The connecting endpoint presents an enrollment credential over the admission ALPN. The receiving node verifies:
+## Select the policy integration
 
-1. The credential's ed25519 signature is valid against the root public key.
-2. The credential has not expired.
-3. For producer credentials: the credential's `endpoint_id` matches the QUIC peer identity.
-4. For OTT (one-time token) consumer credentials: the nonce has not been consumed.
-5. Runtime checks pass (e.g., cloud Instance Identity Document verification, if required by credential attributes).
+| Surface | Application responsibility | Reference |
+| --- | --- | --- |
+| Python high-level server/client | Configure a trusted root and consumer credentials; disable permissive admission | [Python server](/docs/bindings/python/server/) |
+| TypeScript high-level server/client | Provision identity and consumer credentials; keep protected admission enabled | [TypeScript server](/docs/bindings/typescript/server/) |
+| JVM high-level server/client | Configure root and credentials; choose consumer admission or an explicitly supported direct-RPC path | [JVM server](/docs/bindings/java/server/) |
+| Rust | Run connection hooks and supply verified peer attributes explicitly | [Rust server](/docs/bindings/rust/server/) |
+| Go, .NET | Wire the binding's gate and verified policy context; follow its ownership rules | [Language guides](/docs/bindings/) |
+| HTTP / WebTransport | Authenticate a principal independently of Iroh endpoint identity | [HTTP serving](/docs/guides/http/) |
 
-On success, the endpoint is added to the admitted set and its credential attributes are stored for subsequent authorization decisions. The attributes are available to service handlers via `CallContext` without re-checking the signature.
+The references describe API integration. A complete protected deployment also
+needs independent root provisioning, credential expiry/replay policy, health
+checks, and negative tests; see [operations](/docs/guides/operations/).
 
-### Gate 2: Service-level authorization
+## Configure Rust admission explicitly
 
-When a consumer opens a session with a service, the service's interceptors inspect the caller's identity and attributes. This gate is implemented by framework interceptors, not by the trust layer itself. Interceptors can enforce attribute-based access control, check custom policies, or delegate to application-specific authorization logic.
+Rust exposes connection admission and the shared method capability checks.
+The high-level Python enrollment and session-authorization workflows are not
+automatically installed by the Rust server builder. Rust applications must wire
+their own verified admission/attribute policy.
 
-### Gate 3: Method-level capabilities
+Enable hooks in configuration and keep the admission loop running. The default
+hook failure mode is fail-open: a missing answer or stalled loop can lead to
+acceptance after the timeout. Use `HookFailureMode::FailClosed` when failure to
+verify must reject a peer. Account for outbound hooks as well as inbound ones.
 
-Individual methods can declare `CapabilityRequirement` entries that restrict which callers may invoke them:
+Use the independent deployment root when verifying ownership or enrollment
+material. Do not trust a root merely because it arrived inside the credential
+being checked. Bind the verified identity to the connection's actual peer.
 
-| Kind | Meaning |
+## Apply method requirements
+
+The shared dispatcher checks declared capability requirements before invoking
+the handler. The caller's attributes come from the verified policy context.
+In Rust, `AttributeStore` holds peer attributes for authenticated Iroh calls;
+only populate it from trusted application logic.
+
+| Requirement | Meaning |
 | --- | --- |
-| `ROLE` | Caller must have a specific `aster.role` attribute value |
-| `ANY_OF` | Caller must have at least one of the listed capabilities |
-| `ALL_OF` | Caller must have all of the listed capabilities |
+| `ROLE` | Match the caller's `aster.role` value |
+| `ANY_OF` | Require at least one listed capability |
+| `ALL_OF` | Require every listed capability |
 
-These requirements are declared in the service definition and checked by framework interceptors against the attributes in `CallContext`. The check is automatic -- service code does not need to implement it.
+A method with no requirement does not become restricted simply because another
+method on the service has one. Review every public operation and the baseline
+services. Descriptive roles in [NodeInfo](/docs/guides/baseline-services/) do not
+populate caller authorization attributes.
 
-## Root key
+## Enrollment and keys
 
-All trust flows from a single ed25519 keypair called the root key.
+High-level enrollment credentials can bind a producer endpoint to a root-signed
+identity and attributes. Consumer workflows have their own credential and policy
+forms. Use the workflow supported by your installed binding, verify expiry and
+identity constraints, and enforce the intended replay policy for one-time tokens.
 
-The private root key is **offline**. It is generated once, stored securely (hardware-backed where possible), and brought online only to sign enrollment credentials or perform catastrophic recovery. It never touches a running mesh node.
+Keep the private deployment root offline except for authorized signing or recovery.
+Nodes need the configured public root, their own endpoint secret, and the
+credentials required by their role. Aster does not keep an operator's root
+private key offline on their behalf.
 
-The public root key is embedded in every credential and every node's configuration. It is the trust anchor -- nodes verify credential signatures against it.
+An endpoint ticket supplies addressing information and may carry credential
+material depending on its type. Review what you publish. Preserve a node's
+secret key when its identity must survive restart.
 
-There is exactly one root key per deployment. All authorization decisions ultimately trace back to a credential signed by this key.
+## Authenticate HTTP separately
 
-## EnrollmentCredential (producer)
+HTTPS and WebTransport do not carry an authenticated Iroh endpoint identity.
+An application authenticator must verify HTTP or call credentials and return
+an authorized principal and attributes. An incoming peer string or metadata
+field is not proof of identity. Method capability checks still apply after
+authentication. See [HTTP serving](/docs/guides/http/).
 
-An enrollment credential authorizes a specific endpoint to join the producer mesh. It is signed offline by the root key.
+In-process calls have a different boundary again: there is no remote QUIC
+handshake to evaluate. Do not use an in-process success as evidence that
+network admission works. Application interceptors must handle their local-call
+context explicitly.
 
-```
-EnrollmentCredential {
-    endpoint_id   -- the endpoint being authorized (ed25519 public key)
-    root_pubkey   -- the root key's public key
-    expires_at    -- expiry time (epoch seconds)
-    attributes    -- key-value pairs (role, name, cloud identity claims)
-    signature     -- ed25519 signature covering all fields
-}
-```
+## Revoke the authority that protects the resource
 
-Key properties:
-- **Bound to a specific endpoint.** The credential's `endpoint_id` must match the QUIC peer identity during admission. A credential cannot be used by a different endpoint.
-- **Carries attributes.** The `attributes` map provides metadata that downstream authorization gates use. Reserved keys include `aster.role` (producer, gateway, consumer), `aster.name`, and cloud identity claims (`aster.iid_provider`, `aster.iid_account`, `aster.iid_region`).
-- **Time-limited.** The `expires_at` field bounds the blast radius of a compromised key. Expired credentials are rejected.
+There is no universal revocation operation covering every protocol and every
+secret already disclosed. Apply revocation at the relevant enforcement point:
 
-## ConsumerEnrollmentCredential
+- Remove or deny admission and authorization in the policy enforcing access.
+- Advance the fence at a lease serializer to reject stale protected writes.
+- Publish an explicit revoked grant record for cooperating recipients.
+- Rotate a leaked namespace secret and re-grant it to remaining members.
 
-Consumer credentials come in two variants, both signed by the same root key:
+Changing a gossip topic or discovery record does not by itself revoke an
+existing connection, an independently known address, or a previously learned
+capability. See [sealed grants](/docs/guides/sealed-grants/) and
+[fenced leases](/docs/guides/leases/).
 
-**Policy credentials** are not bound to a specific endpoint. They carry attribute-based policies (e.g., "any endpoint running in AWS account X in region Y"). Any endpoint whose Instance Identity Document satisfies the policy can present this credential and be admitted. Multiple endpoints can use the same policy credential simultaneously. This is designed for auto-scaling consumer fleets where individual endpoint IDs are ephemeral.
+## Check the deployed policy
 
-**OTT (one-time token) credentials** carry a 32-byte random nonce. The credential can be used exactly once -- after the nonce is consumed during admission, the credential is invalid. OTTs are suitable for controlled, one-time grants or ephemeral consumers where endpoint IDs are known in advance.
+Test denied connections, missing and expired credentials, wrong roles, and
+stalled policy callbacks. Repeat relevant tests over every enabled transport.
+Use non-sensitive test data while checking permissive development examples.
 
-## Producer mesh
-
-Producers coordinate via iroh-gossip. The gossip topic is derived deterministically from the root public key and a secret random salt:
-
-```
-TopicId = blake3(root_public_key || "aster-producer-mesh" || salt)
-```
-
-The salt is generated by the founding node at startup and is only shared with endpoints after they pass all admission checks. An endpoint that holds a valid enrollment credential but has not been admitted cannot derive the topic ID and cannot subscribe to mesh gossip.
-
-The founding node (first node in the mesh) generates the salt, starts listening, and prints its endpoint ticket. Subsequent nodes bootstrap by dialing the founding node, presenting their credential, and receiving the salt and current membership list on successful admission.
-
-## Deauthorization
-
-Deauthorization in Aster is intentionally epochal, not incremental.
-
-There is no signed "revoke this endpoint" message that cryptographically forces other nodes to evict a peer. A graceful departure message exists but is voluntary -- a compromised node will not send one.
-
-The hard deauthorization mechanism is **salt rotation**. The operator generates a new salt and distributes it out of band to trusted nodes. Those nodes derive a new gossip topic and migrate to it. The excluded node, lacking the new salt, cannot follow. It is left on the old topic, unable to discover the new mesh.
-
-This is coarse-grained by design. It forces the entire mesh to rotate rather than surgically removing one node. The trade-off is simplicity: no revocation lists, no epoch counters, no incremental signed-revoke protocol. Salt rotation is the single mechanism, and it is definitive.
-
-## Development mode
-
-For rapid development and testing, Aster supports a development mode where:
-
-- Endpoints generate ephemeral keys (no persistent identity).
-- All gates are open (no enrollment credentials required).
-- Auto-admission allows any endpoint to connect without presenting credentials.
-
-Development mode is a convenience for local development. It must not be used in production -- there is no security boundary when all gates are bypassed.
-
-## Scope of the trust model
-
-Gates 0 and 1 apply only to remote (network) calls. They are connection-level constructs that operate on QUIC handshakes and admission streams. In-process calls via local transport bypass these gates entirely: the caller is trusted by construction.
-
-Gate 2 and Gate 3 interceptors run on all calls. Interceptors that check `CallContext` must handle the case where `peer` is `None` and `attributes` is empty (the in-process case). The canonical behavior is to trust the in-process caller.
-
-Network-level controls (source IP filtering, CIDR allowlists) are out of scope. iroh's connection model -- relay-mediated paths, hole-punching, multi-homing -- makes source IP an unreliable signal. Operators who need network-level filtering should enforce it at the network boundary (VPN, firewall, network policy), not in the framework.
+Continue with [operations](/docs/guides/operations/),
+[configuration](/docs/reference/configuration/), or
+[language compatibility](/docs/reference/compatibility/).

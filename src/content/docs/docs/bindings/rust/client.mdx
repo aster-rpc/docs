@@ -1,0 +1,137 @@
+---
+title: Rust client
+description: Connect native Rust clients and use typed calls, raw streams, deadlines, sessions, and call policies.
+slug: docs/bindings/rust/client
+---
+
+Rust clients use `Node` for connectivity and `RpcConnection` for calls. The
+service macro generates a typed client over that connection. The [Rust tutorial](/docs/quickstart/rust/) supplies a complete
+project and the `EchoClient` and payload types below. The client invokes a
+registered remote handler; the node owns connectivity, and the connection and
+stream owners must remain alive until the calls finish.
+
+Start with one unary request and response. Use a server stream for results
+arriving over time, request streams for incremental input, and sessions when
+several calls must share private server state.
+
+## Connect to a peer
+
+```rust
+let node = aster::Node::start(aster::AsterConfig::default()).await?;
+let ticket = aster::Ticket::from_base58(&address)?;
+let peer = node.add_ticket_addr(&ticket)?;
+let connection = node.rpc_connect(&peer).await?;
+let client = EchoClient::new(connection);
+let response = client.hello(Request { name: "Rust".into() }).await?;
+println!("{}", response.message);
+```
+
+Register the ticket's addressing hints before dialing. A ticket identifies a
+peer but does not authorize this client. The native Rust path does not perform
+the high-level consumer credential handshake used by Python; a protected
+server must admit the peer through its configured policy.
+
+Keep the node alive for all calls. Reuse a connection for multiple calls rather
+than creating a node per request. Drop client and stream owners before
+`node.shutdown().await`.
+
+## Typed and raw calls
+
+Generated clients serialize payloads and supply service/method headers. Use the
+same service declaration as the producer or a contract-compatible declaration.
+The generated streaming shapes are:
+
+| Pattern | Client behavior |
+| --- | --- |
+| Unary | Request → awaited response |
+| Server stream | Request → typed response stream |
+| Client stream | `Vec<Request>` → awaited response |
+| Bidirectional | `Vec<Request>` → typed response stream |
+
+For incremental request production, use `RpcConnection` directly. Its raw
+methods take a `StreamHeader` and Fory-encoded payload bytes:
+
+| API | Result |
+| --- | --- |
+| `unary` / `unary_with` | One response payload |
+| `server_stream` / `server_stream_with` | `ResponseStream` |
+| `client_stream_open` | `RequestSink` and `ResponseFuture` |
+| `bidi_open` / `bidi_open_with` | `BidiSink` and `ResponseStream` |
+
+Raw methods require matching headers and serialization; arbitrary byte arrays
+are not valid application payloads. `new_payload_fory` supplies the canonical
+Fory configuration for these operations.
+
+## Deadlines and call options
+
+For unary calls made through a typed client, set a connection-wide default
+before wrapping it:
+
+```rust
+let connection = node.rpc_connect(&peer).await?
+    .with_deadline(std::time::Duration::from_secs(5));
+let client = EchoClient::new(connection);
+```
+
+`CallOptions::new().deadline(duration).metadata(key, value)` supplies per-call
+settings to raw `_with` methods. `session(id)` selects a connection-scoped
+session. The connection policy wrapper applies to unary calls;
+set streaming deadlines through the streaming call's options/header rather
+than assuming `with_deadline` wraps every pattern.
+
+A local Tokio timeout bounds how long your task waits. Use the RPC deadline
+and explicit stream cancellation when you need the peer to observe the call's
+budget. Neither a timeout nor cancellation rolls back an application mutation.
+
+## Streaming ownership and backpressure
+
+Call `ResponseStream.next().await` until it returns `None`, checking each
+`Result`. Use `collect()` only when the stream has an acceptable finite size.
+`cancel().await` abandons an unfinished response stream.
+
+`RequestSink.send` sends one payload; `send_last` sends the final payload and
+ends input. `finish` half-closes input without another payload. Keep receiving
+the final response after input closes. Use the sink's explicit cancellation
+API when abandoning a call. Client streaming with no request payload is
+rejected by this API.
+
+For bidi exchanges, send and receive concurrently unless the application
+protocol deliberately alternates one request and one response. Otherwise both
+peers can stall waiting for buffer capacity. Response errors can arrive after
+some payloads have already been delivered.
+
+## Sessions
+
+`connection.open_session()` returns an `RpcSession` with a fresh session ID.
+`session.options()` returns `CallOptions` carrying that ID; session call
+methods attach it to unary and streaming calls. Keep all calls for that
+session on its originating connection. Do not reuse a stale ID after closure.
+
+Sessions share the connection's call machinery and use separate call streams.
+The generated Rust client is the shared-service convenience path; use
+`RpcSession` and its raw methods when you need explicit session-scoped calls.
+The [session guide](/docs/concepts/session-scoped-services/) explains server
+factory and isolation rules.
+
+## Errors and retry policies
+
+RPC calls return `aster::Result`; distinguish remote status failures from
+connection and local serialization failures. Treat authorization failures as
+policy decisions, and check contract names/types before retrying decoding or
+method-lookup failures. Do not parse status messages to control application logic.
+
+`with_retry`, `with_circuit_breaker`, and `with_interceptor` wrap unary calls
+in the Rust facade. These policies do not transparently replay streaming
+calls. Retry only operations whose application behavior is idempotent and
+retain a bounded total deadline.
+
+## Telemetry and data access
+
+RPC metrics and tracing use the Rust observability pipeline. Carry application
+trace context into outgoing calls using the SDK's tracing/interceptor APIs.
+The same client node can use blobs, documents, and gossip; their subscriptions
+and native handles have independent ownership and must be released before
+shutdown.
+
+Continue with the [Rust server](/docs/bindings/rust/server/),
+[data guide](/docs/guides/data/), and [release compatibility](/docs/reference/compatibility/).

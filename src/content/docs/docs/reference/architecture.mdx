@@ -1,15 +1,42 @@
 ---
 title: Architecture
 slug: "docs/reference/architecture"
+description: "Understand the shared Rust engine, language adapters, protocols, and RPC dispatch."
 ---
 
-import MermaidDiagram from '@components/MermaidDiagram.astro';
+import ProtocolMap from '@components/ProtocolMap.astro';
+import RpcFrames from '@components/RpcFrames.astro';
+import SdkLayers from '@components/SdkLayers.astro';
 
 Aster is a multi-language SDK built around a shared Rust engine. The Rust facade and language bindings expose typed services, while Rust implements the transport, RPC dispatch, wire envelopes, and shared security checks.
 
+For a remote worker reporting status to an operator, the language API owns
+the application's types and handler. The Rust engine routes and checks the
+call. Iroh carries it to the authenticated endpoint. This split lets language
+bindings share network behavior while retaining their own runtime and cleanup
+rules. Start with [what is Aster](/docs/overview/what-is-aster/) if these
+subsystems are new to you.
+
+## Follow one RPC call
+
+1. The caller's typed API encodes a request using the registered payload schema.
+2. Its native bridge passes the call to Rust; Iroh connects to the expected
+   endpoint key using the RPC ALPN, `aster/1`.
+3. A call stream carries an AEv1 header and the encoded payload. The header
+   identifies the service, method, and any session.
+4. The Rust dispatcher validates routing, serialization mode, session rules,
+   declared capabilities, and deadlines before invoking the application handler.
+5. The binding runs the handler in its language runtime. The response payload
+   and status return over the call stream; failures surface through the
+   binding's error API.
+
+Admission must already have supplied a verified policy context for protected
+calls. Endpoint authentication alone supplies no application role. See the
+[trust model](/docs/concepts/trust-model/) for allowed and denied requests.
+
 ## SDK layers
 
-<MermaidDiagram source={"graph TD\n    API[\"Rust facade and Python / TypeScript / Go / Java / .NET APIs\"] --> RPC[\"Shared Rust RPC dispatch and transport adapters\"]\n    RPC --> CORE[\"aster_transport_core: endpoints, wire codecs, trust, data protocols\"]\n    CORE --> IROH[\"Iroh: QUIC, blobs, documents, gossip\"]\n    IROH --> NET[\"Direct network paths and encrypted relay traffic\"]\n"} />
+<SdkLayers />
 
 - **Rust facade (`aster`)** provides the Rust RPC API, dispatch, transport adapters, and native-stack access.
 - **Language APIs** adapt service definitions, handler calls, and payload types to Python, TypeScript, Go, Java, and .NET.
@@ -21,7 +48,7 @@ For example, the Python server uses Rust dynamic dispatch for header decoding, m
 
 ## One endpoint, multiple protocols
 
-<MermaidDiagram source={"graph TD\n    NODE[\"IrohNode\"]\n    ROUTER[\"Router\"]\n\n    NODE --> ROUTER\n\n    ROUTER --> BLOBS[\"iroh-blobs<br/><code>BLOBS_ALPN</code>\"]\n    ROUTER --> DOCS[\"iroh-docs<br/><code>DOCS_ALPN</code>\"]\n    ROUTER --> GOSSIP[\"iroh-gossip<br/><code>GOSSIP_ALPN</code>\"]\n    ROUTER --> RPC[\"Aster RPC<br/><code>aster/1</code>\"]\n    ROUTER --> CA[\"Consumer Admission<br/><code>aster.consumer_admission</code>\"]\n    ROUTER --> PA[\"Producer Admission<br/><code>aster.producer_admission</code>\"]\n\n    RPC --> QH1[\"AsterQueueHandler\"]\n    CA --> QH2[\"AsterQueueHandler\"]\n    PA --> QH3[\"AsterQueueHandler\"]\n"} />
+<ProtocolMap />
 
 The Iroh router selects a protocol handler using the connection's ALPN. RPC, admission, blobs, documents, and gossip can share an endpoint identity and network configuration. Different ALPNs use separate QUIC connections; an RPC connection does not carry blob or gossip streams.
 
@@ -31,6 +58,15 @@ The core's `AsterQueueHandler` routes custom-protocol connections into a bounded
 
 Rust executes asynchronous network operations on Tokio. Python's PyO3 bridge exposes awaitables, and the TypeScript NAPI-RS bridge exposes promises. The C ABI exposes handles and completion events for other bindings. Application handlers follow their binding's concurrency model.
 
+### Ownership and concurrency
+
+The server runtime owns its network tasks; the application owns handler work
+and any external resources the handler acquires. Separate call streams can
+invoke a shared instance, or the same session instance, concurrently. The
+application must coordinate mutable state and cooperate with cancellation.
+Closing a native handle is not a universal substitute for awaiting application
+cleanup. Follow the chosen binding's [server and client references](/docs/bindings/).
+
 ## Contracts and payloads
 
 The framework derives a canonical descriptor from a service definition and hashes it with BLAKE3. The resulting `contract_id` identifies that descriptor across bindings. Method names, wire types, and canonical settings must agree; the ID does not verify application behavior.
@@ -39,7 +75,7 @@ See [contract identity](/docs/concepts/contract-identity/) for canonical encodin
 
 ## RPC framing
 
-<MermaidDiagram source={"sequenceDiagram\n    participant C as Client\n    participant S as Server\n\n    C->>S: Open QUIC bidirectional stream\n    C->>S: Frame: StreamHeader (HEADER flag)<br/>service, method, version, metadata\n    C->>S: Frame: Request payload (Fory-serialized)\n    S->>C: Frame: Response payload (Fory-serialized)\n    S->>C: Frame: RpcStatus trailer (TRAILER flag)<br/>code: OK\n"} />
+<RpcFrames />
 
 Headers and status trailers use AEv1, a binary encoding independent of Fory. Request and response payloads use Fory XLANG for cross-language calls. Frames carry a length and flags, including `HEADER` (`0x04`), `TRAILER` (`0x02`), and `COMPRESSED` (`0x01`). Payloads strictly larger than 4096 bytes are compressed by default.
 
@@ -50,3 +86,19 @@ Session-scoped services use connection-scoped session IDs across call streams. T
 A node's secret key determines its endpoint identity. Enrollment credentials and method capability requirements provide deployment authorization under the configured root key. Operator profiles and identity files are configuration mechanisms; they must be protected according to the keys and credentials they contain.
 
 Development settings are permissive. Read the [trust model](/docs/concepts/trust-model/) and [configuration reference](/docs/reference/configuration/) before deploying access-controlled services.
+
+
+## Data and consistency
+
+Blobs store immutable content, documents replicate signed entries, and gossip
+carries live notifications. [Coordination](/docs/guides/coordination/) provides
+an optional replicated serialization point for critical mutable state.
+[Topology](/docs/guides/topology/) supplies placement observations, while
+[leases](/docs/guides/leases/) require fences in the protected resource's write path.
+
+[Salvo](https://salvo.rs/) supplies the optional [HTTP RPC transport](/docs/guides/http/)
+and the [public exposure edge](/docs/guides/expose/). Those are separate integrations
+with different protocol and authentication boundaries.
+
+Continue with [operations](/docs/guides/operations/) or the
+[language and release matrix](/docs/reference/compatibility/).

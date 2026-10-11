@@ -1,11 +1,11 @@
 Build a small Aster Python service and client in the current workspace.
 
 Sources:
-- https://docs.aster.site/docs/quickstart/python
-- https://docs.aster.site/docs/bindings/python
+- https://sdk.getaster.now/docs/quickstart/python
+- https://sdk.getaster.now/docs/bindings/python
 - https://github.com/aster-rpc/aster-rpc
 
-Read the linked Python quickstart before writing code. Use the public-preview 0.3.893 wheel from Forgejo as directed by the guide, and record the exact Aster and Python
+Read the linked Python quickstart before writing code. Use the public wheel from Forgejo as directed by the guide, and record the exact Aster and Python
 versions you install. If the published package and guide disagree, identify the
 mismatch and stop rather than inventing APIs or using private dependencies.
 
@@ -14,7 +14,7 @@ types, a HelloService with a say_hello method, a producer, and a consumer. The
 producer should print its Aster address. The consumer should take that address
 as configuration, call the service with the name World, and print Hello, World!
 
-Use the guide's development configuration for this local demonstration. Do not
+Use the guide's explicit allow_all_consumers=True development configuration for this local demonstration. Do not
 describe it as a production authorization setup. Do not open public firewall
 ports, commit credentials, or change machine-wide networking settings.
 

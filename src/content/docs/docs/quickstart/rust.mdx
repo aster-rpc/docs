@@ -1,0 +1,150 @@
+---
+title: Your first Rust service
+description: Define a typed service and call it over a real peer connection.
+slug: docs/quickstart/rust
+---
+
+This program starts two nodes, serves an `Echo` method on one, and calls it
+from the other over Iroh. Both run in one process so you can try the complete
+RPC path without coordinating two terminals.
+
+The walkthrough was run with Rust 1.96.0 in a fresh Cargo project on Apple
+Silicon macOS. Install the dependencies below together to reproduce it.
+
+This example uses ephemeral identities and permissive admission. Use it with
+test data. [Configure identity and authorization](/docs/concepts/trust-model/)
+before deploying a service.
+
+## Create the project
+
+Install Rust 1.96.0, then create a binary crate:
+
+```sh
+cargo new aster-hello
+cd aster-hello
+mkdir -p .cargo
+```
+
+Save this as `.cargo/config.toml`:
+
+```toml
+[registries.aster]
+index = "sparse+https://forge.emrul.dev/api/packages/Aster/cargo/"
+```
+
+Replace the `[dependencies]` section in `Cargo.toml` with:
+
+```toml
+[dependencies]
+aster = { version = "=0.3.893", registry = "aster", features = ["rpc"] }
+fory-core = "=1.7.6"
+fory-derive = "=1.7.6"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+The registry is anonymously readable. See the [Rust guide](/docs/bindings/rust/)
+for why the Fory dependencies are pinned.
+
+## Define and call the service
+
+The program has four parts: request/response types define the data, an `Echo`
+trait defines the callable method, `EchoImpl` supplies its behavior, and `main`
+creates the two peers. A generated client turns a method call into an RPC.
+The server and client are separate network endpoints even though they share
+one process.
+
+Replace `src/main.rs` with:
+
+```rust
+use aster::{AsterConfig, Node, Ticket};
+use aster::rpc::AsterServer;
+use fory_derive::ForyStruct;
+
+#[derive(ForyStruct, aster::AsterType, Debug, Default, Clone)]
+#[aster(wire = "hello/Request")]
+struct Request {
+    name: String,
+}
+
+#[derive(ForyStruct, aster::AsterType, Debug, Default, Clone)]
+#[aster(wire = "hello/Response")]
+struct Response {
+    message: String,
+}
+
+#[aster::service(name = "Echo", version = 1)]
+trait Echo {
+    async fn hello(&self, request: Request) -> aster::Result<Response>;
+}
+
+struct EchoImpl;
+
+#[aster::rpc::async_trait]
+impl Echo for EchoImpl {
+    async fn hello(&self, request: Request) -> aster::Result<Response> {
+        Ok(Response { message: format!("Hello, {}!", request.name) })
+    }
+}
+
+#[tokio::main]
+async fn main() -> aster::Result<()> {
+    let server = AsterServer::builder()
+        .service(EchoServer::new(EchoImpl))
+        .start()
+        .await?;
+    let node = Node::start(AsterConfig::default()).await?;
+
+    let address = server.address()?;
+    let ticket = Ticket::from_base58(&address)?;
+    let peer = node.add_ticket_addr(&ticket)?;
+    let connection = node.rpc_connect(&peer).await?;
+    let client = EchoClient::new(connection);
+    let response = client.hello(Request { name: "Rust".into() }).await?;
+    println!("{}", response.message);
+
+    drop(client);
+    node.shutdown().await;
+    server.shutdown().await;
+    Ok(())
+}
+```
+
+The macro generates `EchoServer` and `EchoClient`. The address ticket carries
+the server's identity and connection hints; `add_ticket_addr` registers them
+before the client dials the peer.
+
+## Run it
+
+```sh
+cargo run
+```
+
+The program prints `Hello, Rust!` and shuts down both nodes. The first build
+downloads and compiles the native stack, so it takes longer than later runs.
+
+If Cargo cannot find `aster`, check that `.cargo/config.toml` is inside the
+project and that the registry URL ends in `/`. If the connection cannot be
+established, check local firewall rules and the node's available network paths.
+
+## Move to separate processes
+
+Once the one-process example works, a deployment can separate its two roles.
+The following describes the changes; the complete runnable example above
+remains the starting point.
+
+In a producer, print `server.address()?` and keep it alive with
+`server.run().await`. In a consumer, read that ticket and use the same
+`add_ticket_addr` and `rpc_connect` sequence. Both programs need the same payload
+and service definitions.
+
+For a stable identity and durable storage, configure `.identity(path)` and
+`.persistent(directory)` on the server builder. The identity file contains a
+secret key; protect it and keep it separate from the public address ticket.
+
+## Next steps
+
+- [Register services and manage server lifetime](/docs/bindings/rust/server/)
+- [Connect and call from Rust](/docs/bindings/rust/client/)
+- [Rust features and payload types](/docs/bindings/rust/)
+- [Blobs, documents, and gossip](/docs/guides/data/)
+- [Trust model](/docs/concepts/trust-model/)

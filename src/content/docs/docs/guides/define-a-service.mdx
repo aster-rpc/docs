@@ -1,12 +1,21 @@
 ---
 title: Define a service
 slug: "docs/guides/define-a-service"
+description: Define payload identities and four RPC patterns in Python and TypeScript.
 ---
 
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-This guide covers how to define an Aster RPC service: its request/response types, methods, streaming patterns, and configuration options. The concepts are shared across all Aster language bindings. The examples use Python and TypeScript.
+An RPC service is the interface a peer offers to callers: named methods with request and response schemas. For example, a task worker can accept an assignment, stream progress, and receive artifact chunks through one service. This guide shows Python and TypeScript definitions; [Python decorator reference](/docs/guides/services/) gives the detailed Python options.
+
+Start with a working [first service](/docs/quickstart/python/). TypeScript also needs the [metadata build](/docs/guides/typescript-build-setup/). Most blocks below are definition fragments: names such as `WatchRequest` and application helpers must come from your application. They do not start a server or connect a client.
+
+The language tabs illustrate each language independently. Their method and
+field naming conventions, and default numeric types, differ; matching wire
+names alone does not make the two examples a compatible pair. Use the
+[executed cross-language example](/docs/examples/cross-language/) when testing
+one language against another.
 
 ## Wire types
 
@@ -123,7 +132,7 @@ class TaskService {
 | `name` | `str` | `string` | Class name | Service name used in the wire protocol and discovery. |
 | `version` | `int` | `number` | `1` | Service version. Distinct versions are separate services. |
 | `serialization` | `SerializationMode` or list | `SerializationMode[]` | `[XLANG]` | Supported serialization modes. |
-| `scoped` | `str` | `'shared' \| 'session'` | `"shared"` | `"shared"` for singleton, `"session"` for per-connection instances (class `__init__` receives a `peer` argument). |
+| `scoped` | `str` | `'shared' \| 'session'` | `"shared"` | `"shared"` for singleton, `"session"` for instances keyed by connection, session ID, and service (Python `__init__` receives `peer`). |
 | `requires` | `CapabilityRequirement` | `CapabilityRequirement` | `None` / `undefined` | Capability required to call any method on this service. |
 
 ## RPC methods
@@ -290,7 +299,7 @@ All method decorators accept these keyword arguments:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `timeout` | `float` or `None` | `None` | Default timeout in seconds for this method. |
-| `idempotent` | `bool` | `False` | Marks the method as safe to retry. Enables automatic retry by the client. |
+| `idempotent` | `bool` | `False` | Marks the method as safe to retry; automatic retries require an installed retry policy. |
 | `serialization` | `SerializationMode` or `None` | `None` | Override the service-level serialization for this method. |
 | `requires` | `CapabilityRequirement` or `None` | `None` | Capability required to call this specific method. |
 
@@ -308,7 +317,7 @@ Dynamic proxies accept plain objects and construct XLANG payloads from the produ
 
 ## Session-scoped services
 
-By default, services are shared: one instance handles all connections. Session-scoped services create a new instance per connection, allowing per-connection state.
+By default, one shared service instance handles calls from all connections. A session-scoped instance belongs to a connection, session ID, and service. Two sessions on one connection can therefore hold separate chat state. Each method call uses its own stream; ending a call stream does not close the session.
 
 ```python
 @service("ChatRoom", scoped="session")
@@ -329,19 +338,21 @@ class ChatRoomService:
         self.messages.append(req.text)
         return SendMessageResponse(echo=f"[{self.nickname}] {req.text}")
 
-    async def on_session_close(self) -> None:
-        """Called when the session stream ends."""
+    async def close(self) -> None:
+        """Scheduled when the session closes."""
         print(f"Session closed for {self.nickname}: {len(self.messages)} messages")
 ```
 
 Requirements for session-scoped services:
 
-- `__init__` must accept a `peer` positional parameter (the remote peer's endpoint id as a hex string). The framework calls `cls(peer)` when a new session opens.
+- `__init__` must accept the named `peer` argument (the remote peer's endpoint ID as a hex string). The factory calls `cls(peer=...)` for a new session instance.
 - Instance attributes persist across all RPC calls within the session.
-- `on_session_close()` is called when the client closes the session or disconnects.
-- Session-scoped services are multiplexed over a single bidirectional QUIC stream per consumer -- one session, one stream, multiple method calls.
+- The optional `close()` hook runs when the session is released. An async hook is scheduled rather than awaited by session cleanup; own and await critical durable cleanup separately.
+- Session-scoped services associate method calls with a connection-scoped session ID. Each call uses its own stream; the service instance is shared for the session lifetime.
 
-## Full working example
+## Complete service definition
+
+This block defines payloads and handlers. Register the service with the matching [server API](/docs/bindings/python/server/) to expose it; it is not a standalone application.
 
 ```python
 from dataclasses import dataclass
@@ -427,3 +438,18 @@ class TaskService:
 ```
 
 This service can be hosted with `AsterServer(services=[TaskService()])` and consumed via `AsterClient`. See [Hello Service](/docs/examples/hello-service) for a runnable end-to-end example.
+
+## Verify the four patterns
+
+Register the complete `TaskService` definition above with the [Python server](/docs/bindings/python/server/), then connect its [typed client](/docs/bindings/python/client/). A `get_task` request for `task-7` returns that ID with status `running`; `watch_tasks` yields five updates; `ingest_logs` returns the number of supplied entries; `execute` echoes each action as `executed: <action>`.
+
+For a session service, open two sessions on the same connection, set a different nickname in each, and verify calls retain the matching state. Close one session and confirm the other remains usable. Do not use a completed method stream as evidence that session cleanup ran.
+
+Apply deadlines and cancel a stream while it is active. The application must release its own work and resources according to the binding's cancellation behavior. This definition does not implement durable task storage or deduplicate mutations.
+
+## Next steps
+
+- [Python decorator reference](/docs/guides/services/)
+- [Python server](/docs/bindings/python/server/)
+- [TypeScript server](/docs/bindings/typescript/server/)
+- [Contract identity](/docs/concepts/contract-identity/)

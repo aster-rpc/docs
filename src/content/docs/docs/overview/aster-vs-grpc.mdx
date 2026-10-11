@@ -1,11 +1,12 @@
 ---
 title: Aster vs gRPC
 slug: "docs/overview/aster-vs-grpc"
+description: "Compare peer identity, network reachability, contracts, and operational choices with gRPC."
 ---
 
 [gRPC](https://grpc.io/) and Aster offer typed RPC with unary and streaming calls. Their deployment models differ: gRPC commonly connects to named network services, while Aster connects to peers identified by public keys.
 
-Aster 0.3.893 is a public preview. Assess its compatibility and operational requirements before adopting it for production workloads.
+Aster is a public preview. Assess its compatibility and operational requirements before adopting it for production workloads.
 
 ## Comparison
 
@@ -33,7 +34,7 @@ QUIC streams avoid TCP's connection-wide delivery ordering across streams. They 
 
 Protocol Buffers provides an explicit schema and a well-established code-generation workflow. Aster derives contracts from application code and uses a BLAKE3 `contract_id` to identify the canonical interface. Cross-language definitions must agree on wire names, types, and settings.
 
-Aster uses [Apache Fory](https://fory.apache.org/) for XLANG payloads. Additional serialization modes have binding-specific limits. Dynamic tools can convert JSON input to XLANG; JSON wire mode has been retired. Encrypted packets remain encrypted regardless of serialization format. Measure representative payloads and end-to-end calls when comparing performance. See [serialization](/docs/concepts/serialization/).
+Aster uses [Apache Fory](https://fory.apache.org/) for XLANG payloads. Additional serialization modes have binding-specific limits. Dynamic tools can convert JSON input to XLANG. The legacy JSON RPC wire mode has been retired; opt-in browser JSON projections are available through the [HTTP transport](/docs/guides/http/). Encrypted packets remain encrypted regardless of serialization format. Measure representative payloads and end-to-end calls when comparing performance. See [serialization](/docs/concepts/serialization/).
 
 ## Sessions and permissions
 
@@ -44,5 +45,14 @@ Aster also includes enrollment and method capability checks. These require an op
 ## Choosing a framework
 
 gRPC is a useful starting point when your team already relies on its schema tooling, HTTP integrations, or established language ecosystem. Aster is worth evaluating when endpoint identity, cross-network connectivity, or stateful peer sessions are central requirements and you can work within a public preview's stability limits.
+
+Before choosing, check three practical conditions:
+
+- Does your deployment already provide the routable services and HTTP tooling
+  you need, or is reaching changing peers a central application problem?
+- Can your chosen Aster binding express and run your actual payloads, streaming
+  patterns, admission policy, and cleanup requirements?
+- Can you operate persistent keys, any required relays, and application recovery
+  while accepting preview API changes?
 
 Try [your first service](/docs/quickstart/python/) or read the [gRPC migration guide](/docs/guides/port-from-grpc/).

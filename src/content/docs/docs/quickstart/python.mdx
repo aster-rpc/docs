@@ -1,5 +1,5 @@
 ---
-title: Quickstart
+title: Your first Python or TypeScript service
 slug: "docs/quickstart/python"
 description: Define a greeting service and call it from a second process.
 ---
@@ -11,8 +11,25 @@ import agentPrompt from '@prompts/first-service.txt?raw';
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 
-<AgentBrief prompt={agentPrompt} download="/prompts/first-service.txt" />
-This guide defines a greeting service and calls it from a second process. Peers can also run on separate networks when a direct or relay path is available.
+
+
+A remote procedure call (RPC) lets one process invoke a method hosted by
+another. You will run a **producer** that hosts a greeting service and a
+**consumer** that calls it and prints `Hello, World!`. Use the Python or
+TypeScript tab consistently for this first run; the
+[cross-language example](/docs/examples/cross-language/) connects different
+languages afterward.
+
+The service definition describes the request and response. The producer prints
+an address ticket, which the consumer uses to find and authenticate that peer.
+Start both processes on the same machine before trying separate networks.
+
+:::note[Verified preview example]
+The producer/consumer examples were run in isolated projects on Apple Silicon
+macOS with Python 3.13 and Node.js 22/26.
+They use permissive development admission. Other operating systems and
+cross-network paths were not validated in this walkthrough.
+:::
 
 ## Prerequisites
 
@@ -36,7 +53,7 @@ This guide defines a greeting service and calls it from a second process. Peers 
 <Tabs syncKey="language">
 <TabItem label="Python">
 
-Aster **0.3.893 is a public preview**. This version is distributed through [Forgejo packages](https://forge.emrul.dev/Aster/-/packages), rather than PyPI. Choose the wheel for your platform from the [Python artifact list](https://forge.emrul.dev/api/v1/packages/Aster/generic/aster-python/0.3.893/files): Apple Silicon macOS, Linux x86-64 or ARM64 (glibc 2.34+), or Windows x86-64.
+Install the Python package from [Forgejo packages](https://forge.emrul.dev/Aster/-/packages). Choose the wheel for your platform from the [Python artifact list](https://forge.emrul.dev/api/v1/packages/Aster/generic/aster-python/0.3.893/files): Apple Silicon macOS, Linux x86-64 or ARM64 (glibc 2.34+), or Windows x86-64.
 
 For example, on Apple Silicon macOS:
 
@@ -50,7 +67,7 @@ Use the corresponding wheel URL on other platforms. Python 3.9–3.13 is require
 </TabItem>
 <TabItem label="TypeScript">
 
-Aster **0.3.893 is a public preview**. This version is available from [Forgejo packages](https://forge.emrul.dev/Aster/-/packages); it was not published to npmjs.org.
+Install the TypeScript package from [Forgejo packages](https://forge.emrul.dev/Aster/-/packages) using the Aster registry scope below.
 
 Add this scope mapping to your project's `.npmrc`:
 
@@ -160,7 +177,7 @@ from aster import AsterServer
 
 
 async def main():
-    async with AsterServer(services=[HelloService()]) as srv:
+    async with AsterServer(services=[HelloService()], allow_all_consumers=True) as srv:
         print("Producer ready at:", srv.address)
         await srv.serve()
 
@@ -187,10 +204,18 @@ import { HelloService } from './service.js';
 
 const server = new AsterServer({
   services: [new HelloService()],
+  allowAllConsumers: true, // Development only: no enrollment required.
 });
 await server.start();
 console.log("Producer ready at:", server.address);
-await server.serve();
+// Keep this standalone Node process alive while native work is pending.
+const keepAlive = setInterval(() => {}, 60_000);
+try {
+  await server.serve();
+} finally {
+  clearInterval(keepAlive);
+  await server.close();
+}
 ```
 
 ```bash
@@ -198,19 +223,24 @@ npx tsc
 node producer.js
 ```
 
+The timer keeps a standalone Node producer alive: native
+pending work alone may not keep the JavaScript event loop alive. Keep it until
+`serve()` completes and clear it during shutdown. Without it, the producer can
+exit with an unsettled top-level-await warning and leave consumers waiting.
+
 </TabItem>
 </Tabs>
 
-In dev mode (no `ASTER_*` environment variables set), the server:
+These examples explicitly allow unenrolled consumers for development. With no identity configured, the server:
 
-- Generates an ephemeral root key and node identity (no files needed).
+- Generates an ephemeral node identity.
 - Opens the consumer gate so consumers can connect without credentials.
 - Serves RPC, blobs, docs, and gossip on a single endpoint.
 - Prints an `aster1...` address for consumers to connect to.
 
 ## Run a consumer
 
-A **consumer** is the node that calls into a producer's services. Consumers don't need access to the service's source code -- they discover methods from the producer's published contract at runtime, then call them by name.
+A consumer calls a producer's service. The Python example uses a dynamic proxy that reads the published contract. The TypeScript example shares the service definition to get a statically typed client.
 
 The producer and consumer can run on separate networks. Aster attempts a direct connection and uses a relay when needed. Connectivity still requires a reachable direct or relay path. The `aster1...` address contains the endpoint identity and connection hints.
 
@@ -257,19 +287,22 @@ Create `consumer.ts`:
 
 ```typescript
 import { AsterClientWrapper } from '@aster-rpc/aster';
+import { HelloService, HelloRequest } from './service.js';
+import { SERVICES, WIRE_TYPES, BUILD_ALL_TYPES } from './aster-rpc.generated.js';
 
 const client = new AsterClientWrapper({
   address: process.env.ASTER_ENDPOINT_ADDR!,
+  generated: { SERVICES, WIRE_TYPES, buildAllTypes: BUILD_ALL_TYPES },
 });
-await client.connect();
+try {
+  await client.connect();
 
-// The dynamic proxy builds XLANG requests from the published contract --
-// methods are discovered from the producer's published contract.
-const hello = await client.proxy("HelloService");
-const resp = await hello.sayHello({ name: "World" });
-console.log(resp.message); // Hello, World!
-
-await client.close();
+  const hello = await client.client(HelloService);
+  const resp = await hello.sayHello(new HelloRequest({ name: "World" }));
+  console.log(resp.message); // Hello, World!
+} finally {
+  await client.close();
+}
 ```
 
 Run it, passing the producer's address:
@@ -295,6 +328,26 @@ The producer publishes its contract and prints an `aster1...` address. The consu
 
 Development mode uses an ephemeral identity, so the address changes after a restart. To try separate machines, copy the current address into the consumer’s `ASTER_ENDPOINT_ADDR`. Each machine needs a reachable direct or relay path.
 
+## Check the result
+
+The consumer should print `Hello, World!` and exit. The producer remains
+running until you stop it with Ctrl+C. If the result does not appear:
+
+- Confirm the producer is still running and copy its current address again.
+- If TypeScript reports missing metadata, run `npx aster-gen` and `npx tsc`
+  from the project directory before starting the producer.
+- If admission is refused, check the explicit development admission flag
+  instead of assuming that a new identity opens access.
+- If the call reports an unknown service or method, use the matching tab
+  for both processes: the Python method is `say_hello`, the TypeScript
+  method is `sayHello`.
+
+<AgentBrief prompt={agentPrompt} download="/prompts/first-service.txt" />
+
 ## Next steps
 
-The [Mission Control walkthrough](/docs/quickstart/mission-control) adds streaming, sessions, capability requirements, and an MCP bridge. See the [trust model](/docs/concepts/trust-model) before exposing a service beyond development.
+Choose a task in [What’s next](/docs/quickstart/first-service/), or try the
+[Python-to-JavaScript call](/docs/examples/cross-language/).
+
+The [Mission Control walkthrough](/docs/quickstart/mission-control) explores streaming, sessions, and capability requirements. It remains a draft
+for the full multi-chapter workflow. See the [trust model](/docs/concepts/trust-model) before exposing a service beyond development.

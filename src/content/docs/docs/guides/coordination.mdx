@@ -1,0 +1,111 @@
+---
+title: Replicated coordination
+description: Coordinate fenced state with Rust voters and durable clients across languages.
+slug: docs/guides/coordination
+---
+
+Aster coordination maintains small pieces of authoritative state through a
+replicated voter group. Voters are nodes that participate in agreeing on
+updates; a quorum must be available to commit new work. Replication lets the
+group preserve an agreed decision across individual node failures.
+
+Use it when competing mutations must have one agreed
+order: lease ownership, fenced registers, or control-plane decisions whose
+overlap could corrupt state.
+
+Keep large immutable data in [blobs](/docs/guides/data/). Keep eventually
+consistent discovery information in documents. Coordination is for the
+decisions that require serialization.
+
+## Before you start
+
+You need a working Rust node, durable disks for voters, stable endpoint identities, operator-controlled membership authority, and a client journal directory that survives process restarts. The feature declaration below enables the API; it does not create a group. This page explains the integration sequence, rather than supplying a qualified three-voter deployment script.
+
+## Choose the process role
+
+| Role | Rust feature | Responsibility |
+| --- | --- | --- |
+| Voter or learner host | `coordination` | Persist group state and participate in replication |
+| Client, holder, or administrator | `coordination-client` | Submit operations and keep a durable client journal |
+
+Both features are opt-in. `coordination-client` includes RPC without adding
+the voter implementation. Hosting voters requires Rust. Python, TypeScript,
+Go, Java, and .NET wrap the Rust client engine; they do not reimplement the
+consensus protocol.
+
+For a Rust client, use the [registry configuration](/docs/bindings/rust/) and:
+
+```toml
+aster = { version = "=0.3.893", registry = "aster", features = ["coordination-client"] }
+```
+
+## Prepare a group
+
+Plan persistent node identities, separate durable storage for each member,
+an independently configured deployment root, and the initial voter set.
+Genesis and join authority bind membership to the intended group and identity.
+Keep authority signing under operator control; a key supplied alongside a
+signature is not by itself a trust anchor.
+
+A three-voter group requires two voters for quorum. Place voters according to
+the failures you need to tolerate, rather than treating node count as failure
+independence. Learners copy state but do not add votes. Membership changes and
+recovery require the coordination administration APIs; starting another node
+with a copied data directory is not a replacement procedure.
+
+## Preserve client results
+
+Each durable client owns a journal directory. A mutation is not finished for
+the application merely because a response arrived:
+
+1. Submit the operation through the durable client.
+2. Receive the resolved result, which is persisted before delivery.
+3. Record the application effect durably.
+4. Explicitly acknowledge the result.
+
+Until acknowledgement, the client does not issue a new sequence. After a
+restart, `unacknowledged()` and `resume()` recover the saved or unresolved
+operation. Binding method names vary, but this lifecycle is shared.
+
+The guarantee is exactly-once server effect with durable result redelivery.
+Exactly-once application processing additionally requires atomic handling of
+the application's durable effect and acknowledgement, or an application-level
+deduplication strategy. A timeout or lost connection does not establish that
+the server rejected a mutation; resume it instead of submitting a new identity.
+
+## Fence the protected resource
+
+A coordination lease gives a holder a fence. The protected resource must
+validate that fence inside the same transaction or lock that applies the write.
+An external database or filesystem does not acquire this check automatically.
+See [fenced leases](/docs/guides/leases/).
+
+Grant rights to exact resources and identities. Separate read, mutate, lease,
+and administration authority according to the application's needs. A successful
+transport connection alone grants none of these rights.
+
+## Handle failures
+
+| Condition | Application response |
+| --- | --- |
+| Quorum unavailable | Stop expecting new committed mutations; restore quorum |
+| Mutation outcome unknown | Reopen the same journal and resume |
+| Saved result awaiting acknowledgement | Finish durable application handling, then acknowledge |
+| Lease lost or fence rejected | Stop protected writes and resolve ownership |
+| Placement information missing | Treat locality as unknown; do not infer independent failure domains |
+
+Monitor group health, leader changes, journal storage, and application-level
+completion. Keep recovery authority and backups separate from ordinary client
+credentials. Practice group recovery before depending on it operationally.
+
+## Check an interrupted control-plane update
+
+Consider a scheduler that commits the active catalog pointer. Create the group with three distinct voter identities, then connect one durable client to that group. Submit one pointer update and stop the client after resolution but before acknowledgement. Reopen the same journal: recover the pending result, apply or deduplicate the application effect, and acknowledge it before submitting the next mutation.
+
+The expected outcome is one committed server mutation with a recoverable result. If two voters are unavailable, the group cannot commit new work. If the journal is lost, the application cannot safely treat a fresh client sequence as a retry of the old operation. Verify these cases in a disposable group before production; group creation, authority provisioning, and recovery commands require a deployment-specific runbook.
+
+## Next steps
+
+- [Fenced leases](/docs/guides/leases/)
+- [Topology and placement](/docs/guides/topology/)
+- [Operating a node](/docs/guides/operations/)

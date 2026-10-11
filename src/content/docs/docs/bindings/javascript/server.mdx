@@ -1,10 +1,23 @@
 ---
-title: Server
+title: TypeScript server
 slug: "docs/bindings/typescript/server"
+description: "Host TypeScript services with generated metadata, explicit admission policy, and controlled runtime lifetime."
 ---
 
+`AsterServer` makes decorated TypeScript methods callable by other peers. It
+owns the node and native dispatcher; your application supplies handlers,
+generated service metadata, and the process lifetime that keeps them available.
 
-# TypeScript server reference
+Use one shared service for ordinary commands, streams for incremental messages,
+and session-scoped services for private state across calls. Configure admission
+separately from these handler choices.
+
+## Before you start
+
+For a complete standalone producer, use the [tested quickstart](/docs/quickstart/python/).
+It includes explicit development admission and the Node event-loop
+keepalive workaround. The fragments below describe APIs and assume the
+application owns its process lifecycle.
 
 ## AsterServer
 
@@ -16,6 +29,7 @@ import { HelloService } from './service.js';
 
 const server = new AsterServer({
   services: [new HelloService()],
+  allowAllConsumers: true, // Development example.
   config: {
     logFormat: 'json',
   },
@@ -23,8 +37,21 @@ const server = new AsterServer({
 
 await server.start();
 console.log("Producer ready at:", server.address);
-await server.serve(); // blocks until shutdown
+try { await server.serve(); }
+finally { await server.close(); }
 ```
+
+`HelloService` must have been processed by `aster-gen` and compiled with the
+application. The address is a public connection ticket. Awaiting `serve()`
+retains this task; the standalone process also needs the quickstart's owned
+keepalive timer while native work is pending.
+
+| Lifecycle checkpoint | What your application does |
+| --- | --- |
+| Before `start()` | Load service definitions and generated metadata; select admission policy |
+| After `start()` | Read the ticket and make the running service available to callers |
+| While serving | Retain the server and process lifetime; finish or cancel application work |
+| During `close()` | Release subscriptions and other application resources before process exit |
 
 ### Options
 
@@ -34,7 +61,7 @@ await server.serve(); // blocks until shutdown
 | `config` | `Partial<AsterConfig>` | `{}` | Override config values |
 | `identity` | `string` | `undefined` | Path to a `.aster-identity` TOML file |
 | `peer` | `string` | `undefined` | Peer name to load from the identity file |
-| `allowAllConsumers` | `boolean` | `true` | Open-gate mode (dev). Set `false` for trusted mode. |
+| `allowAllConsumers` | `boolean` | `false` | Open-gate mode (dev). Set `false` for trusted mode. |
 | `interceptors` | `Interceptor[]` | `[]` | Server-side interceptors |
 
 ### Methods
@@ -133,7 +160,6 @@ The TypeScript binding exports these interceptors:
 
 ```typescript
 import {
-  DeadlineInterceptor,
   RetryInterceptor,
   RateLimitInterceptor,
   AuthInterceptor,
@@ -146,6 +172,45 @@ import {
 const rateLimit = new RateLimitInterceptor({ globalRps: 1000, perServiceRps: 500 });
 ```
 
-See the [Python Server Reference](/docs/bindings/python/server) for detailed interceptor documentation — check TypeScript constructor options when adapting Python examples.
+Configure interceptors using the [TypeScript API reference](/api/typescript/).
+Client retry policies and server admission have different responsibilities; a
+retry interceptor does not make a mutation idempotent.
+
+Deadlines are enforced by the shared Rust dispatch path using method and per-call settings. The TypeScript package does not export `DeadlineInterceptor` in TypeScript.
 
 Built-in RPC metrics are recorded in the shared Rust telemetry pipeline. See [observability](/docs/guides/observability) for configuration.
+
+## Sessions and concurrent handlers
+
+`@Service({ name: "Counter", scoped: "session" })` declares session scope.
+Rust dispatch keys state by connection and session ID, so multiple sessions
+can share a peer connection. Do not key session state only by peer identity.
+Calls can overlap across streams; protect mutable state against asynchronous
+interleaving. See [session-scoped services](/docs/concepts/session-scoped-services/)
+for factory and lifetime rules.
+
+## Admission, errors, and cleanup
+
+Protected admission is the default. Use a provisioned identity and peer entry
+for credential-based deployments; the consumer-admission handshake verifies
+credentials before protected RPC access. `allowAllConsumers: true` is the
+explicit development setting. Method capability requirements still apply and
+must use verified attributes rather than caller-supplied metadata.
+
+Throw an exported `RpcError` subtype for an intentional application failure.
+Unexpected handler errors become internal statuses. For streams, a terminal
+failure can follow already-delivered payloads; callers must handle both partial
+data and the final status. Cancellation or deadline expiry does not roll back
+committed application writes.
+
+Keep server-owned data handles within the server lifetime and close independent
+subscriptions explicitly. `close()` joins native server shutdown; finish
+application-owned work and telemetry flushing before exiting the process.
+For a standalone Node producer, use the quickstart's owned timer so pending
+native work keeps the process alive with the native addon.
+
+## Next steps
+
+- [TypeScript client](/docs/bindings/typescript/client/)
+- [Tested producer and consumer](/docs/quickstart/python/)
+- [Trust model](/docs/concepts/trust-model/)

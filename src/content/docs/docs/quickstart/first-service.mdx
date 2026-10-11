@@ -1,74 +1,83 @@
 ---
-title: "What's next"
-description: After the quickstart — explore your service, connect AI agents, and prepare for production.
-slug: "docs/quickstart/first-service"
+title: What's next
+description: Choose the next task after your first call, from streaming and state to protected deployment.
+slug: docs/quickstart/first-service
 ---
 
+Your first call establishes that two peers can connect, agree on a request and
+response, and execute a service method. The next step depends on what your
+application needs to do. Keep the working example as a checkpoint: add one
+capability and verify its result before changing the next part.
 
-# What's next
+## Extend your service
 
-You have a working service from the [Python quickstart](/docs/quickstart/python). Here's where to go from here.
+| What your application needs | Next step | What to verify |
+| --- | --- | --- |
+| Return progress or results over time | Add a server-streaming method using your language's server guide. | The client sees messages incrementally and can stop receiving. |
+| Upload many records in one call | Add a client-streaming method. | The server reads incrementally and reports its final result. |
+| Exchange ongoing commands and results | Add a bidirectional method. | Sending and receiving can proceed concurrently; each side handles cancellation. |
+| Keep client-specific state across calls | Use [session-scoped services](/docs/concepts/session-scoped-services/). | Two sessions have separate state, even on one connection. |
+| Connect another language | Follow the [cross-language example](/docs/examples/cross-language/). | Request fields and response values survive the language boundary. |
 
-## Explore your service with the shell
+Continue with the server and client references for your language:
+[Rust](/docs/bindings/rust/), [Python](/docs/bindings/python/),
+[TypeScript](/docs/bindings/typescript/), [Go](/docs/bindings/go/),
+[Java and Kotlin](/docs/bindings/java/), or [.NET](/docs/bindings/dotnet/).
+The APIs differ, including how streaming handlers are registered and who owns
+session resources.
 
-The Aster shell lets you browse services, inspect contracts, and invoke methods interactively — without needing any type definitions locally.
+## Inspect calls interactively
+
+The Aster shell lets you inspect published services and invoke methods without
+writing another client. Install the CLI separately using the
+[CLI reference](/docs/reference/cli/), keep the producer running, and pass its
+current address:
 
 ```bash
 aster shell <endpoint-addr>
 ```
 
-Navigate services like a filesystem, tab-complete method names, and invoke RPCs from the command line:
+Browse the service names the producer actually advertises. The Rust quickstart
+hosts `Echo`; the Python and TypeScript quickstart hosts `HelloService`.
+The [dialing guide](/docs/guides/dial-a-service/) explains the shell workflow
+and credential requirements. Successful SDK calls do not by themselves
+qualify every shell command against every binding.
 
-```bash
-producer:/$ cd services/HelloService
-producer:/services/HelloService$ ./say_hello name="World"
-{
-  "message": "Hello, World!"
-}
-```
+## Connect an AI tool client
 
-See [Dial a Service](/docs/guides/dial-a-service) for the full shell guide.
+An MCP bridge translates a service's published contract into tools an
+MCP-compatible client can invoke. This is useful when an assistant needs to
+query application state or request an action through your existing service.
 
+Start with [MCP integration](/docs/guides/mcp-integration/). Choose which methods
+to expose and configure the bridge's credentials. A tool description exposes
+a callable interface; the server still needs to authorize the action.
 
-## Connect an AI agent
+## Add shared data
 
-Expose your service to Claude or any MCP-compatible AI agent with a single command:
+A method call is transient. If callers need content after the call finishes,
+choose a storage or replication mechanism:
 
-```bash
-aster mcp <endpoint-addr>
-```
+- [Blobs and documents](/docs/guides/data/) store content and replicate entries
+  that refer to it.
+- [Sealed grants](/docs/guides/sealed-grants/) distribute data capabilities to
+  intended recipients.
+- [Coordination](/docs/guides/coordination/) orders decisions that competing
+  writers must agree on.
+- [Fenced leases](/docs/guides/leases/) protect a resource from writes made by
+  an owner whose lease has ended.
 
-The bridge derives tool definitions from the published contract. Credentials and local filters determine which methods it exposes.
+Begin with the data guide's choice table. Use [topology](/docs/guides/topology/)
+when choosing where work should run; an observed placement preference does not
+grant exclusive ownership.
 
-See [AI Agent Integration (MCP)](/docs/guides/mcp-integration) for security layers and configuration.
+## Prepare a deployment
 
+The quickstarts use permissive admission and temporary identities. Before
+using real data, follow the [trust model](/docs/concepts/trust-model/) and your
+language's server guide to choose an access policy. Test both an allowed call
+and a denied call.
 
-## Define richer services
-
-The quickstart used a single unary method. Aster supports:
-
-- **Server streaming** (`@server_stream`) — stream results to the caller
-- **Client streaming** (`@client_stream`) — receive a stream of requests
-- **Bidirectional streaming** (`@bidi_stream`) — both sides stream concurrently
-- **Session-scoped services** — stateful instances identified by connection, session ID, and service
-
-See [Defining Services and Types](/docs/guides/services) for the full decorator reference.
-
-
-## Prepare for production
-
-In dev mode, Aster auto-admits every peer. For production you need identity and trust:
-
-Follow the trust configuration guide to create persistent endpoint identities and issue scoped credentials.
-
-See [Trust Model](/docs/concepts/trust-model) for the full four-gate authorization model, and [Configuration](/docs/reference/configuration) for all settings.
-
-
-## Learn the concepts
-
-| Topic | What you'll learn |
-|-------|------------------|
-| [Transport](/docs/concepts/transport) | How Aster connects peers by public key with NAT traversal |
-| [Contract identity](/docs/concepts/contract-identity) | How services get deterministic, content-addressed identities |
-| [Serialization](/docs/concepts/serialization) | The three serialization modes and when to use each |
-| [Discovery](/docs/concepts/discovery) | How services are published and resolved without central infrastructure |
+Then use [operating a node](/docs/guides/operations/) to preserve identity and
+state, check readiness, observe failures, and shut down. A first successful
+call is the starting point for testing restart, recovery, and access boundaries.

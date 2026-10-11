@@ -1,10 +1,20 @@
 ---
 title: Hello service
 slug: "docs/examples/hello-service"
+description: "Understand a Python greeting service, its producer and typed consumer, and the lifetime of one call."
 ---
 
 
-This Python example defines a greeting RPC in three files and uses open development admission. Peers need a reachable direct or relay path.
+This example separates a Python application into three files: a shared service
+definition, a producer that hosts it, and a typed consumer that calls it. Use
+this layout when you want client-side autocomplete and explicit request types
+while keeping the producer and consumer in separate processes.
+
+First complete the Python installation in the
+[quickstart](/docs/quickstart/python/). Use one project directory and the same
+virtual environment in both terminals. This example deliberately permits
+unenrolled consumers; use test data and configure the
+[trust model](/docs/concepts/trust-model/) before deployment.
 
 ## The service definition
 
@@ -13,12 +23,14 @@ Create `hello_service.py` with the shared type and service definitions:
 ```python
 # hello_service.py
 from dataclasses import dataclass
-from aster import service, rpc
+from aster import service, rpc, wire_type
 
+@wire_type("hello/HelloRequest")
 @dataclass
 class HelloRequest:
     name: str = ""
 
+@wire_type("hello/HelloResponse")
 @dataclass
 class HelloResponse:
     message: str = ""
@@ -38,7 +50,9 @@ class HelloService:
 - `@service` marks the class as an Aster RPC service. The service name defaults to the class name (`HelloService`), version defaults to `1`.
 - `@rpc` marks `say_hello` as a unary RPC method. The framework inspects the type annotations (`HelloRequest` and `HelloResponse`) to handle serialization automatically.
 
-Since no `@wire_type` is applied, the `@service` decorator auto-tags the types using their module-qualified names. This is fine for development; production services should use explicit `@wire_type` tags.
+The explicit wire names keep payload identity independent of the local Python
+module path. Both processes import the same definitions, so they agree on
+service and method names as well as payload fields.
 
 ## The producer
 
@@ -51,7 +65,7 @@ from hello_service import HelloService
 from aster import AsterServer
 
 async def main():
-    async with AsterServer(services=[HelloService()]) as srv:
+    async with AsterServer(services=[HelloService()], allow_all_consumers=True) as srv:
         print(f"Endpoint address: {srv.address}")
         print("Waiting for connections... (Ctrl+C to stop)")
         await srv.serve()
@@ -61,8 +75,8 @@ asyncio.run(main())
 
 **Line by line:**
 
-- `AsterServer(services=[HelloService()])` creates a producer that hosts one service. The server builds an iroh node, registers the `aster/1` ALPN for RPC, and runs the consumer admission ALPN for discovery.
-- `async with` calls `start()` (which creates the QUIC endpoint) and `serve()` (which starts the accept loop). On exit, it calls `close()`.
+- `AsterServer(services=[HelloService()], allow_all_consumers=True)` creates a producer that hosts one service. The server creates a node, registers the service, and explicitly permits unenrolled consumers for this example.
+- `async with` starts the server; awaiting `serve()` keeps this standalone producer running. Leaving the context closes the server.
 - `srv.address` is the `aster1...` connection address that consumers need to connect.
 
 ## The consumer
@@ -76,7 +90,7 @@ from hello_service import HelloService, HelloRequest
 from aster import AsterClient
 
 async def main():
-    async with AsterClient(address="<paste address from producer>") as client:
+    async with AsterClient() as client:
         hello = await client.client(HelloService)
         resp = await hello.say_hello(HelloRequest(name="World"))
         print(resp.message)
@@ -86,13 +100,15 @@ asyncio.run(main())
 
 **Line by line:**
 
-- `AsterClient(address=...)` takes the `aster1...` address printed by the producer. Alternatively, set `ASTER_ENDPOINT_ADDR` as an environment variable and omit the argument.
+- `AsterClient()` reads the producer address from `ASTER_ENDPOINT_ADDR`, set below. The address identifies the peer and provides connection hints.
 - `async with` calls `connect()`, which creates a QUIC endpoint and runs the admission handshake to discover available services.
 - `client.client(HelloService)` returns a typed stub. The stub's `say_hello` method serializes the request, sends it over QUIC, deserializes the response, and returns it.
 
 ## Running it
 
-Open two terminals. No credentials or configuration files are needed.
+Open two terminals in the project directory and activate the same Python
+environment. This producer explicitly accepts consumers without enrollment
+credentials.
 
 **Terminal 1 -- producer:**
 
@@ -104,18 +120,14 @@ python producer.py
 Output:
 
 ```
-Endpoint address: g6Jpa...kNQ==
+Endpoint address: <actual address printed by the producer>
 Waiting for connections... (Ctrl+C to stop)
 ```
 
 **Terminal 2 -- consumer:**
 
 ```bash
-# Option A: pass the address inline in the code
-python consumer.py
-
-# Option B: use an environment variable
-export ASTER_ENDPOINT_ADDR=g6Jpa...kNQ==
+export ASTER_ENDPOINT_ADDR="<paste the complete producer address>"
 python consumer.py
 ```
 
@@ -125,22 +137,26 @@ Output:
 Hello, World!
 ```
 
-## What is happening under the hood
+## Follow one call
 
-1. **QUIC endpoint creation.** Both producer and consumer create iroh QUIC endpoints. Each gets an ed25519 identity key (ephemeral by default) and connects to a relay server for NAT traversal.
+1. The producer starts a node and publishes `HelloService`. Its printed address
+   contains the endpoint identity and connection hints.
+2. The consumer connects using that address. The Python wrapper performs
+   consumer admission and obtains service information. The explicit open flag
+   permits this example's unenrolled caller.
+3. `client.client(HelloService)` supplies a typed interface. Calling `say_hello`
+   serializes `HelloRequest`, sends the RPC, and waits for a response.
+4. The server dispatches the request to your Python method and returns its
+   `HelloResponse`. The consumer prints `Hello, World!` and closes its node.
+5. The producer continues serving. Stop it with Ctrl+C after the test.
 
-2. **ALPN negotiation.** The consumer first connects on the `aster.consumer_admission` ALPN. The producer responds with the list of available services (in this case, `HelloService` v1) and its RPC channel address.
-
-3. **Admission.** In dev mode (no root key configured), the producer auto-opens the consumer gate. The consumer is admitted without credentials.
-
-4. **RPC connection.** The consumer opens a second QUIC connection on the `aster/1` ALPN. This connection carries RPC traffic.
-
-5. **Call dispatch.** The consumer sends a `StreamHeader` (service name, method name, serialization mode), followed by the serialized `HelloRequest`. The producer deserializes it, calls `say_hello`, serializes the `HelloResponse`, and sends it back.
-
-6. **Cleanup.** When the `async with` blocks exit, both sides close their QUIC connections and endpoints.
+A new producer identity can produce a new address after restart. Copy the
+current address if a previously working consumer can no longer connect. If
+Python cannot import `aster`, check which virtual environment is active. If
+the service or method is missing, confirm both terminals use the same files.
 
 ## Next steps
 
-- Add `@wire_type` tags for production stability: [Define a Service](/docs/guides/define-a-service)
+- Choose stable wire names and extend the contract: [Define a Service](/docs/guides/define-a-service)
 - Connect with credentials: [Dial a Service](/docs/guides/dial-a-service)
 - Add streaming methods: [Define a Service -- Streaming](/docs/guides/define-a-service#server-streaming-server_stream--serverstream)

@@ -4,6 +4,7 @@ node_modules/
 # Production
 build/
 dist/
+dist-local/
 
 # Generated files
 .docusaurus/
@@ -47,3 +48,7 @@ CLAUDE.md
 _internal/
 # Astro generated files
 .astro/
+.envrc
+
+# Published tutorial source archives
+!/public/examples/*.zip

@@ -1,0 +1,136 @@
+---
+title: Your first .NET service
+description: Run a C# server and client using the released NuGet package and native runtime.
+slug: docs/quickstart/dotnet
+---
+
+This project starts a C# server and client, makes one unary call, receives three
+streamed responses, and disposes both nodes. A unary call returns one result;
+a server stream lets the handler deliver results as they become available.
+The two nodes communicate over loopback within one process.
+
+The project targets `net9.0`. It was run on Apple Silicon macOS with .NET SDK
+10.0.301 and .NET runtime 9.0.4.
+
+These examples use ephemeral identities, a loopback bind address, disabled
+relays, and open development admission. Use test data and configure
+[identity and authorization](/docs/concepts/trust-model/) before deployment.
+
+## Get the project
+
+Install a .NET SDK capable of targeting `net9.0` and the .NET 9 runtime.
+A .NET 10-only runtime installation does not run this target by default.
+
+Download and extract [hello-dotnet.zip](/examples/hello-dotnet.zip), then enter
+its `hello-dotnet` directory. It contains the complete `Program.cs`, project
+file, and `NuGet.Config`. The [package guide](/docs/bindings/dotnet/) explains
+the Aster feed and patched Fory dependency.
+
+The project has three files:
+
+| File | Responsibility |
+| --- | --- |
+| `Program.cs` | Define the payloads, register handlers, start peers, and make calls. |
+| `Hello.csproj` | Select the target framework and package; copy the native library to output. |
+| `NuGet.Config` | Route Aster and its Fory dependency to the correct package feed. |
+
+The server owns the handlers and its node. The client owns a second node; its
+connection stays alive until both calls finish. `await using` closes these
+resources when their scopes end.
+
+## Install the matching native library
+
+The managed package needs its native runtime beside the application. On
+Apple Silicon macOS, run inside `hello-dotnet`:
+
+```sh
+curl -fLO https://forge.emrul.dev/api/packages/Aster/generic/aster-ffi/0.3.893/libaster_transport_ffi-osx-arm64.tar.gz
+curl -fLO https://forge.emrul.dev/api/packages/Aster/generic/aster-ffi/0.3.893/FFI-SHA256SUMS
+awk '$2 == "libaster_transport_ffi-osx-arm64.tar.gz"' FFI-SHA256SUMS | shasum -a 256 -c -
+tar -xzf libaster_transport_ffi-osx-arm64.tar.gz
+```
+
+The project copies `libaster_transport_ffi.dylib` to its output directory.
+For another platform, use its matching release library and update the project's
+`None Include` entry to that filename. The execution qualification above covers
+macOS ARM64; it does not establish that other platforms were tested here.
+
+## Run the server and client
+
+```sh
+dotnet run --project Hello.csproj
+```
+
+Expected output:
+
+```text
+Hello, .NET!
+Hello, .NET! (1)
+Hello, .NET! (2)
+Hello, .NET! (3)
+```
+
+The complete program is:
+
+```csharp
+using Aster;
+using Aster.Rpc;
+using Apache.Fory;
+
+var service = ServiceDefinition.Create("Echo", 1)
+    .Unary<Request, Response>("hello", (req, ctx) =>
+        ValueTask.FromResult(new Response { Message = $"Hello, {req.Name}!" }))
+    .ServerStream<Request, Response>("greet", Greet)
+    .Build();
+var config = new AsterConfig { RelayMode = "disabled", BindAddr = "127.0.0.1:0" };
+await using var server = await AsterServer.StartAsync(new AsterServerOptions {
+    Config = config with { AllowAllConsumers = true }, Services = { service }
+});
+await using var client = await AsterClient.StartAsync(config);
+client.RegisterTypes(service);
+using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+await using var connection = await client.ConnectAsync(await server.TicketAsync(), timeout.Token);
+var reply = await connection.UnaryAsync<Request, Response>("Echo", "hello",
+    new Request { Name = ".NET" }, cancellationToken: timeout.Token);
+Console.WriteLine(reply.Message);
+await foreach (var item in connection.ServerStreamAsync<Request, Response>("Echo", "greet",
+    new Request { Name = ".NET" }, cancellationToken: timeout.Token)) {
+    Console.WriteLine(item.Message);
+}
+
+static async IAsyncEnumerable<Response> Greet(Request request, ServerCallContext context) {
+    for (int i = 1; i <= 3; i++) {
+        context.CancellationToken.ThrowIfCancellationRequested();
+        yield return new Response { Message = $"Hello, {request.Name}! ({i})" };
+        await Task.Yield();
+    }
+}
+[ForyStruct, WireType("hello/Request")]
+public sealed class Request { public string Name { get; set; } = ""; }
+[ForyStruct, WireType("hello/Response")]
+public sealed class Response { public string Message { get; set; } = ""; }
+```
+
+`RegisterTypes` configures the client codec from the service definition. The
+connection and nodes remain alive for the unary call and response enumeration.
+`await using` disposes them in reverse order after work completes.
+
+## Run separate processes
+
+Share the payload classes and service contract. The producer publishes
+`await server.TicketAsync()` and remains alive under its application's host
+lifetime. The consumer passes the received `AsterTicket` to `ConnectAsync`.
+Use a network-appropriate bind/relay configuration when the peer is not on the
+same machine; the sample intentionally uses loopback.
+
+## Troubleshooting
+
+- A native-library loading failure usually means the library was not copied
+  into output, has the wrong architecture, or depends on a missing system library.
+- An ABI mismatch means the managed and native releases are not compatible.
+- A Fory restore failure requires the Aster source mapping for `Apache.Fory`.
+- A protected-gate refusal requires admission of the client's peer identity;
+  passing an address ticket alone does not grant access.
+
+Continue with the [.NET server](/docs/bindings/dotnet/server/),
+[.NET client](/docs/bindings/dotnet/client/), and [operations](/docs/guides/operations/).

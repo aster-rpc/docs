@@ -1,0 +1,44 @@
+---
+import './diagram.css';
+const { producerAdmission = true } = Astro.props;
+const data = [
+  ['Blobs', 'Immutable content'],
+  ['Documents', 'Signed, replicated entries'],
+  ['Gossip', 'Live peer messages'],
+];
+const rpc = [
+  ['RPC', 'aster/1'],
+  ['Consumer admission', 'aster.consumer_admission'],
+  ...(producerAdmission ? [['Producer admission', 'aster.producer_admission']] : []),
+];
+---
+<figure class="aster-diagram not-content">
+  {[false, true].map(mobile => {
+    const width = mobile ? 360 : 720;
+    const groups = [data, rpc];
+    return <svg class={mobile ? 'mobile' : 'desktop'} viewBox={`0 0 ${width} ${mobile ? 726 : 438}`} role="img" aria-label="One Iroh endpoint routes separate ALPN connections to data protocols or Aster RPC and admission handlers.">
+      <title>One identity, separate protocol connections</title>
+      <rect class="panel" x="4" y="4" width={width - 8} height={mobile ? 718 : 430} rx="10" />
+      <text class="title" x="24" y="34">One Iroh endpoint</text>
+      <text class="sub" x="24" y="57">Shared identity and network configuration</text>
+      <rect class="box" x="24" y="80" width={width - 48} height="64" rx="6" />
+      <text class="title" x={width / 2} y="107" text-anchor="middle">Protocol router</text>
+      <text class="sub" x={width / 2} y="128" text-anchor="middle">Selects the handler by ALPN</text>
+      {groups.map((rows, group) => {
+        const x = mobile ? 24 : 24 + group * 344;
+        const y = mobile ? 186 + group * 268 : 186;
+        const w = mobile ? 312 : 328;
+        return <g>
+          <path class="arrow" d={mobile ? (group === 0 ? 'M180 144 V169 m-4-5 4 5 4-5' : 'M180 154 H12 V438 H180 V447 m-4-5 4 5 4-5') : `M360 144 V160 H${x + w/2} V174 m-4-5 4 5 4-5`} />
+          <text class="title" x={x} y={y + 8}>{group === 0 ? 'Data protocols' : 'Aster protocols'}</text>
+          {rows.map(([title, sub], i) => <g>
+            <rect class={group === 0 ? 'box-muted' : 'box'} x={x} y={y + 24 + i * 68} width={w} height="58" rx="6" />
+            <text class="title" x={x + 14} y={y + 48 + i * 68}>{title}</text>
+            <text class="sub" x={x + 14} y={y + 69 + i * 68}>{sub}</text>
+          </g>)}
+        </g>;
+      })}
+    </svg>;
+  })}
+  <figcaption>Each ALPN uses its own QUIC connection. Sharing an endpoint does not put RPC, blobs, and gossip on one connection.</figcaption>
+</figure>

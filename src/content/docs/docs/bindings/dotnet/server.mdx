@@ -1,0 +1,144 @@
+---
+title: .NET server
+description: Register C# handlers, stream responses, authorize peers, and shut down native resources.
+slug: docs/bindings/dotnet/server
+---
+
+`AsterServer.StartAsync` starts the shared Rust dispatcher and routes calls to
+C# handlers. The [.NET tutorial](/docs/quickstart/dotnet/)
+provides package sources, native loading, and a complete runnable project.
+The server owns its native node and dispatcher; your handlers supply application
+behavior and own any external resources they open.
+
+Define payloads, build a service descriptor with handlers, start the server,
+and keep it alive until callers finish. Use streams for incremental input or
+output and session factories when one caller needs private state across calls.
+
+## Define and register services
+
+Use `[ForyStruct]` and `[WireType("namespace/Name")]` on payload classes.
+`ServiceDefinition` binds wire method names to typed handlers:
+
+```csharp
+var service = ServiceDefinition.Create("Echo", 1)
+    .Unary<Request, Response>("hello", (request, context) =>
+        ValueTask.FromResult(new Response { Message = $"Hello, {request.Name}!" }),
+        idempotent: true, defaultTimeout: TimeSpan.FromSeconds(5))
+    .Build();
+```
+
+`Request` and `Response` are defined in the tutorial. `service.ContractId`
+identifies the canonical contract. Changing names, payload types, method
+patterns, or requirements can change that ID.
+
+## Start and stop
+
+```csharp
+await using var server = await AsterServer.StartAsync(new AsterServerOptions {
+    Config = new AsterConfig {
+        BindAddr = "127.0.0.1:0", RelayMode = "disabled",
+        AllowAllConsumers = true // Local development only.
+    },
+    Services = { service },
+    HandlerTimeout = TimeSpan.FromSeconds(30)
+});
+Console.WriteLine(await server.TicketAsync());
+```
+
+The server is serving when startup completes. Keep the process alive with your
+host's lifetime or cancellation mechanism. Prefer `await using` so asynchronous
+native cleanup completes before process exit.
+
+| Option | Meaning |
+| --- | --- |
+| `Config` | Node identity, storage, transport, and admission configuration |
+| `Services` | Service definitions to register |
+| `Codec` | Payload codec; Fory is the default |
+| `Gate` | Optional caller-owned admission gate |
+| `Interceptors` | Application request/response/error hooks |
+| `RingCapacity` | Native dispatch event ring; default 256 |
+| `MaxSessionsPerConnection` | Session cap; default 1024 |
+| `HandlerTimeout` | Server-wide handler deadline cap |
+| `Health` | Optional health/readiness/metrics listener |
+
+`AsterConfig.FromEnv()` explicitly loads environment configuration. Set stable
+identity and storage paths before deploying; ephemeral defaults are useful for
+tests. Do not copy the tutorial's permissive admission into a protected service.
+
+## Four handler patterns
+
+| Builder method | Handler input | Handler output |
+| --- | --- | --- |
+| `Unary<TReq,TResp>` | Request and `ServerCallContext` | `ValueTask<TResp>` |
+| `ServerStream<TReq,TResp>` | Request and context | `IAsyncEnumerable<TResp>` |
+| `ClientStream<TReq,TResp>` | `IAsyncEnumerable<TReq>` and context | `ValueTask<TResp>` |
+| `BidiStream<TReq,TResp>` | Request sequence and context | Response sequence |
+
+```csharp
+static async IAsyncEnumerable<Response> Greet(Request request, ServerCallContext context) {
+    for (int i = 1; i <= 3; i++) {
+        context.CancellationToken.ThrowIfCancellationRequested();
+        yield return new Response { Message = $"Hello, {request.Name}! ({i})" };
+        await Task.Yield();
+    }
+}
+```
+
+Register this with `.ServerStream<Request, Response>("greet", Greet)` before
+`Build()`. For request streams, use `await foreach` and propagate the context's
+cancellation token to downstream I/O. Responses may wait for backpressure;
+avoid holding shared locks while producing them.
+
+## Context and session state
+
+`ServerCallContext` exposes `PeerId`, `ConnectionId`, `SessionId`, `SessionKey`,
+`Metadata`, `Attributes`, `Deadline`, and `CancellationToken`.
+
+Create session services with `ServiceDefinition.Create(name, version,
+ServiceScope.Session)` and `.SessionFactory(peerId => new SessionState())`.
+Retrieve the object through `context.Session`. State belongs to a
+connection-scoped session ID; it is not one singleton per peer or per stream.
+Shared and session handlers can overlap, so synchronize mutable state.
+
+The server disposes session objects implementing disposal interfaces, but
+`IAsyncDisposable.DisposeAsync` is scheduled without awaiting completion. Await critical application cleanup separately before process exit.
+`ConnectionClosed` and `SessionClosed` events let applications release related
+state. Keep event callbacks short and nonblocking.
+
+## Admission and method authorization
+
+Without a supplied gate, `AllowAllConsumers=true` selects open development
+mode and false selects protected admission. The .NET wrapper does
+not perform Python's credential enrollment workflow. Admit verified peer IDs
+through the gate, or implement the required non-RPC admission handler using
+`NonRpcConnection`. That handler owns the received connection.
+
+Method builders accept `requires: CapabilityRequirement.Role("operator")`;
+`.Requires(...)` sets a service-wide requirement. `server.SetPeerAttributes`
+bridges verified Iroh peer attributes into Rust's authorization checks. An
+untrusted metadata header is not evidence that its sender holds a role.
+
+## Deadlines and errors
+
+Rust combines caller deadlines, method defaults, and the server cap before
+invoking a handler. Observe `context.CancellationToken` to stop application work
+when a call expires, the caller cancels, or the server shuts down.
+
+Throw `RpcError` for an intentional status. Unexpected handler failures become
+`Internal`; avoid leaking secrets through error messages. Cancellation cannot
+undo an application mutation already committed before it was observed.
+
+## Ownership and operations
+
+`server.Node` exposes data protocols; it is owned by the server. Do not dispose
+it independently or start another RPC accept loop on it. `server.Health`
+exposes an attached health listener; readiness follows server lifetime.
+`Services`, `LiveCalls`, and `ActiveSessions` provide local operational views.
+
+Dispose streams and application resources before the server. A supplied gate
+is caller-owned. Rust metrics and traces share the native pipeline, and logs
+bridge to `Microsoft.Extensions.Logging`. Configure observability before
+startup when explicit exporters or logging settings are required.
+
+Continue with the [.NET client](/docs/bindings/dotnet/client/),
+[trust model](/docs/concepts/trust-model/), and [operations](/docs/guides/operations/).

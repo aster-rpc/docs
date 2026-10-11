@@ -1,0 +1,16 @@
+/* Shared visual vocabulary, following the Kasm documentation diagrams. */
+.aster-diagram { margin: 1.75rem 0; }
+.aster-diagram svg { display: block; width: 100%; height: auto; font-family: var(--sl-font); }
+.aster-diagram .panel { fill: var(--sl-color-gray-3); fill-opacity: .04; stroke: var(--sl-color-gray-4); }
+.aster-diagram .box { fill: var(--sl-color-accent); fill-opacity: .12; stroke: var(--sl-color-accent); }
+.aster-diagram .box-muted { fill: var(--sl-color-gray-3); fill-opacity: .08; stroke: var(--sl-color-gray-4); }
+.aster-diagram .title { fill: var(--sl-color-text); font-size: 17px; font-weight: 600; }
+.aster-diagram .sub { fill: var(--sl-color-gray-2); font-size: 14px; }
+.aster-diagram .arrow { fill: none; stroke: var(--sl-color-gray-3); stroke-width: 1.5; }
+.aster-diagram .arrowhead { fill: var(--sl-color-gray-3); }
+.aster-diagram figcaption { margin-top: .75rem; font-size: .85rem; line-height: 1.6; color: var(--sl-color-gray-2); }
+.aster-diagram .mobile { display: none; }
+@media (max-width: 600px) {
+  .aster-diagram .desktop { display: none; }
+  .aster-diagram .mobile { display: block; }
+}

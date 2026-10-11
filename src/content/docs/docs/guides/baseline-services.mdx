@@ -1,0 +1,84 @@
+---
+title: Baseline services
+description: Describe a node and expose topology through the reserved framework services.
+slug: docs/guides/baseline-services
+---
+
+Baseline services let a tool query a node without knowing its application
+contracts in advance. They use the reserved `aster.*` service namespace and
+`aster/` wire-type namespace. Use an application-owned namespace for your own
+services and payloads.
+
+## Before you start
+
+Start a Rust [first service](/docs/quickstart/rust/) and retain its server and client connection. The builder fragment below configures a node description; it does not make a remote call. Use NodeInfo when an operator needs to identify which worker a ticket reaches before invoking application methods.
+
+## Describe a node
+
+`AsterServer` enables `aster.ops.NodeInfo` by default. Its idempotent
+`describe()` method returns `NodeIdentity`: the node ID, configured name,
+tags, roles, and typed attributes.
+
+In Rust, configure the initial record on the builder:
+
+```rust
+use aster::rpc::AsterServer;
+use aster::rpc::baseline::NodeIdentity;
+
+let server = AsterServer::builder()
+    .node_identity(NodeIdentity {
+        node_name: "worker-7".into(),
+        tags: vec!["eu".into()],
+        ..Default::default()
+    })
+    .start()
+    .await?;
+```
+
+The server stamps `node_id` from its endpoint identity. The remaining metadata
+is application-supplied description; a role advertised in NodeInfo does not
+grant that role to a caller for authorization.
+
+`server.node_identity()` returns a live handle for updating the description.
+The node ID stays pinned when the description changes.
+
+## Restrict disclosure
+
+By default NodeInfo is available to callers admitted by the transport. Use
+`.node_info_requires(...)` for a capability requirement or
+`.builtin_node_info(false)` to disable it. A server with NodeInfo disabled
+still needs a service to serve.
+
+`aster.net.Topology` is separately opt-in because it exposes inferred network
+layout. Enable monitoring, opt in with `.builtin_topology(true)`, and set
+`.topology_requires(...)` for the intended observers. Remote topology omits
+local socket addresses.
+
+The bindings share the native baseline dispatcher but use their own
+configuration names. Check the installed package before translating these
+Rust builder calls directly.
+
+## Check the returned description
+
+With an existing Rust `RpcConnection` from the first-service connection sequence, call the generated baseline client:
+
+```rust
+use aster::rpc::baseline::NodeInfoClient;
+
+let info = NodeInfoClient::new(connection).describe().await?;
+println!("{}: {} {:?}", info.node_id, info.node_name, info.tags);
+```
+
+The client takes ownership of the connection handle passed to it; clone the
+handle first if another caller needs it. Keep the node alive until the call
+finishes.
+
+Call `aster.ops.NodeInfo.describe` through a client with the matching baseline contract. For the builder above, expect `node_name` to be `worker-7`, `tags` to contain `eu`, and `node_id` to match the server endpoint. Empty roles or attributes are valid. Treat the name and tags as self-description rather than independently verified placement or authority.
+
+Test the same call with a principal that lacks your configured NodeInfo requirement. Expect authorization rejection; if the service is disabled, expect service lookup or dispatch failure instead. Do not report either as an unhealthy application automatically.
+
+## Next steps
+
+- [Topology](/docs/guides/topology/)
+- [Method permissions](/docs/concepts/trust-model/)
+- [Observability](/docs/guides/observability/)

@@ -1,11 +1,28 @@
 ---
 title: What is Aster?
 slug: "docs/overview/what-is-aster"
+description: "How endpoint identity, typed calls, replicated data, and coordination fit a remote-worker application."
 ---
 
-Aster is a peer-to-peer application SDK with typed RPC services. Applications connect to an endpoint's cryptographic identity and use enrollment credentials and method permissions to control access. It is intended for services that run across developer machines, customer networks, and cloud instances.
+Aster is a peer-to-peer application SDK with typed RPC services. Applications connect to an endpoint's cryptographic identity and configure admission and method permissions to control access. It is intended for services that run across developer machines, customer networks, and cloud instances.
 
-Aster 0.3.893 is a public preview. It provides Rust, Python, TypeScript, Go, Java, and .NET APIs against the same Rust engine. The preview does not provide a general-availability stability guarantee.
+Aster is a public preview. It provides Rust, Python, TypeScript, Go, Java, and .NET APIs against the same Rust engine. The preview does not provide a general-availability stability guarantee.
+
+## A remote-worker application
+
+Suppose workers run in customer networks and an operator dispatches jobs from
+cloud infrastructure. A worker's endpoint key identifies it when its IP address
+changes. Typed RPC carries job requests and status responses. Large job inputs
+can move as blobs, while documents replicate references and observations.
+
+Those parts have different responsibilities. A discovered worker may be
+unreachable by the time a call starts. A replicated status entry can arrive
+late. If only one worker may publish a result, the application needs an
+agreed ownership decision and a resource that rejects stale fences. Admission
+and method policy determine which workers and operators may participate.
+
+Start with RPC and add data or coordination when the application requires
+them; a first service does not need every subsystem.
 
 ## Endpoint identity and connectivity
 
@@ -21,21 +38,30 @@ Define services in application code using the language's decorators, annotations
 
 ## Access control and discovery
 
-Enrollment credentials establish deployment membership. Method capability requirements restrict calls after admission. These protections depend on the configured trust policy; the quickstart's development settings allow unauthenticated application access. Read the [trust model](/docs/concepts/trust-model/) before deploying with sensitive data.
+Configured enrollment workflows can establish deployment membership. Method capability requirements restrict calls after admission. These protections depend on the configured trust policy; the quickstart's development settings allow unauthenticated application access. Read the [trust model](/docs/concepts/trust-model/) before deploying with sensitive data.
 
 The [service registry](/docs/concepts/discovery/) uses Iroh documents, blobs, and gossip to replicate contract and endpoint information between participating peers. Applications can also connect using an explicit endpoint address.
 
+## Data and coordination
+
+RPC is one part of the SDK. [Blobs and documents](/docs/guides/data/) store
+content and replicate signed entries. [Topology](/docs/guides/topology/)
+helps select peers from measured locality and path quality.
+[Sealed grants](/docs/guides/sealed-grants/) distribute capabilities to named
+recipients. [Coordination](/docs/guides/coordination/) serializes critical state,
+with [fenced leases](/docs/guides/leases/) for protected single-writer resources.
+
+Rust services can also use [HTTPS and WebTransport](/docs/guides/http/).
+[HTTP exposure](/docs/guides/expose/) connects an existing HTTP application
+through an Aster peer or public edge.
+
 ## Language support
 
-| Language | Preview surface |
-| --- | --- |
-| Rust | Supported facade and native transport access |
-| Python | RPC API and native binding |
-| TypeScript | RPC API and native binding |
-| Go | RPC API through the C ABI |
-| Java | RPC API through the native binding |
-| .NET | RPC API through the C ABI |
+Rust is the native facade. Python, TypeScript, Go, Java, and .NET adapt the
+shared Rust engine to their runtimes. Package delivery, enrollment workflows,
+and newer feature helpers differ. Kotlin uses the JVM runtime and is not
+independently qualified in the six-language RPC matrix.
 
-Kotlin is not independently qualified in this preview. Cross-language interoperability requires compatible contracts and serialization settings; matching language support alone does not establish compatibility for every application type.
-
-Start with [your first service](/docs/quickstart/python/), or compare deployment requirements in [Aster vs gRPC](/docs/overview/aster-vs-grpc/).
+Use the [language and release matrix](/docs/reference/compatibility/) to choose
+a binding. Start with the [Rust quickstart](/docs/quickstart/rust/) or
+[Python and TypeScript quickstart](/docs/quickstart/python/).

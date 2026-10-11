@@ -17,7 +17,19 @@ const { source } = Astro.props;
     if (rendering) { pending = true; return; }
     rendering = true;
     const dark = document.documentElement.dataset.theme === 'dark';
-    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'default', fontFamily: 'Geist, sans-serif' });
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base', fontFamily: 'Geist, sans-serif', themeVariables: {
+      primaryColor: dark ? '#123b38' : '#e3f3ef',
+      primaryTextColor: dark ? '#edf5f3' : '#182c29',
+      primaryBorderColor: dark ? '#62c5ac' : '#287660',
+      lineColor: dark ? '#a3a7b0' : '#555a64',
+      secondaryColor: dark ? '#252b30' : '#f0f2f3',
+      tertiaryColor: dark ? '#1a2226' : '#f7f9f8',
+      noteBkgColor: dark ? '#252b30' : '#f0f2f3',
+      noteTextColor: dark ? '#edf5f3' : '#182c29',
+      actorTextColor: dark ? '#edf5f3' : '#182c29',
+      signalTextColor: dark ? '#edf5f3' : '#182c29',
+      fontSize: '15px',
+    } });
     for (const [index, figure] of diagrams.entries()) {
       const output = figure.querySelector<HTMLElement>('[data-diagram-output]');
       const source = figure.querySelector<HTMLElement>('[data-diagram-source]');

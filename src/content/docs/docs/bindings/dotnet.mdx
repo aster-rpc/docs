@@ -1,0 +1,82 @@
+---
+title: .NET
+description: Install the .NET preview with its matching native library and Fory dependency.
+slug: docs/bindings/dotnet
+---
+
+The .NET binding targets .NET 9 and calls the Rust engine through the C ABI.
+It exposes asynchronous RPC and data operations, cancellation tokens, and
+disposable owners for native resources. Use it to host C# handlers or call
+remote peers from an existing asynchronous .NET application.
+
+Before copying package snippets, follow the [complete .NET project](/docs/quickstart/dotnet/)
+for native loading on your platform. Installation needs both managed packages
+and a native library matching the SDK and target architecture. The managed
+assembly alone cannot start a node.
+
+## Configure package sources
+
+The preview uses the Aster
+[NuGet feed](https://forge.emrul.dev/Aster/-/packages). Save this as
+`NuGet.Config` beside your solution:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="aster" value="https://forge.emrul.dev/api/packages/Aster/nuget/index.json" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+  <packageSourceMapping>
+    <clear />
+    <packageSource key="aster">
+      <package pattern="Aster" />
+      <package pattern="Aster.*" />
+      <package pattern="Apache.Fory" />
+    </packageSource>
+    <packageSource key="nuget.org">
+      <package pattern="*" />
+    </packageSource>
+  </packageSourceMapping>
+</configuration>
+```
+
+Add the pinned SDK:
+
+```sh
+dotnet add package Aster --version 0.3.893
+```
+
+The runtime requires the patched `Apache.Fory` dependency `1.7.6-aster.1`
+from this feed. The source mapping keeps it on that feed while allowing
+ordinary dependencies from NuGet.org. Keep the native library bundled with,
+or supplied for, your selected SDK release and target architecture.
+
+## Resource ownership
+
+Use `using` or `await using` for native owners according to their interfaces.
+Close dependent clients, subscriptions, and listeners before shutting down
+their runtime. Cancellation behavior belongs to each operation: a canceled
+wait is not evidence that a remote mutation was rolled back.
+
+Coordination mutations return durable results that require explicit
+acknowledgement after application handling. Restore unresolved work from the
+same client journal rather than creating a new client to repeat the mutation.
+
+## Telemetry
+
+Rust owns exporters, metrics, and tracing. The binding bridges Rust log events
+to `Microsoft.Extensions.Logging` and provides application instruments over
+the same pipeline. Initialize telemetry before starting services if you need
+explicit configuration.
+
+## Next steps
+
+- [First service](/docs/quickstart/dotnet/)
+- [.NET server](/docs/bindings/dotnet/server/)
+- [.NET client](/docs/bindings/dotnet/client/)
+
+- [Language and release compatibility](/docs/reference/compatibility/)
+- [Coordination](/docs/guides/coordination/)
+- [Observability](/docs/guides/observability/)

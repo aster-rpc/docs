@@ -1,0 +1,156 @@
+---
+title: Go server
+description: Define typed Go services, handle streams and sessions, and control admission and shutdown.
+slug: docs/bindings/go/server
+---
+
+`StartServer` starts a node and registers Go handlers with the Rust dispatcher.
+Rust owns protocol framing, routing, method capabilities, session limits, and
+deadlines. Go executes each handler in a goroutine.
+
+Start with the [Go setup and example](/docs/quickstart/go/)
+for a complete project; snippets below extend that example. Register the
+methods callers may use, keep the server alive for their calls, and close it when application work stops.
+The server owns the node it starts; your handler code owns its files, downstream
+requests, and other application resources.
+
+Use unary handlers for commands with one result, streams for incremental
+records, and session factories for private state spanning several calls.
+
+## Define a service
+
+Payloads implement `WireTyped`. Use explicit wire names shared with other
+languages, and tag binary fields `fory:"type=bytes"`. The default `ForyCodec`
+registers the service's request and response types during startup.
+
+```go
+service := aster.NewService("Echo", 1,
+    aster.Unary("hello", func(ctx context.Context, req *Request) (*Response, error) {
+        return &Response{Message: "Hello, " + req.Name + "!"}, nil
+    }, aster.Idempotent(), aster.Timeout(5*time.Second)),
+)
+```
+
+`Idempotent` declares that repeating the operation is safe. Do not apply it to
+an operation merely to enable retries. `service.ContractID()` returns the
+canonical contract ID or a validation error.
+
+## Start and stop
+
+```go
+server, err := aster.StartServer(ctx, aster.ServerOptions{
+    Config: aster.AsterConfig{
+        RelayMode: "disabled", BindAddr: "127.0.0.1:0",
+        AllowAllConsumers: true, // Local development only.
+    },
+    Services: []*aster.Service{service},
+    HandlerTimeout: 30*time.Second,
+})
+if err != nil { return err }
+defer server.Close()
+ticket, err := server.Ticket(ctx)
+if err != nil { return err }
+fmt.Println(ticket)
+```
+
+The server serves after `StartServer` returns; there is no separate `Serve`
+step. Keep your process alive until its application shutdown signal, then
+close the server. For a standalone producer, wait on a signal-derived context.
+The example's loopback binding and disabled relays restrict it to local use.
+
+| Option | Meaning |
+| --- | --- |
+| `Config` | Node identity, storage, bind address, relays, and protocol settings |
+| `Services` | Shared or session-scoped service definitions |
+| `Gate` | Optional caller-owned connection admission policy |
+| `Interceptors` | Go application hooks around handler execution |
+| `HandlerTimeout` | Global handler cap; zero uses 300 seconds, negative disables the cap |
+| `MaxSessionsPerConnection` | Session limit; default 1024 |
+| `RingCapacity` | Native dispatch event capacity; default 256 |
+| `Health` | Optional health/readiness/metrics listener |
+
+Load environment or TOML configuration explicitly with `ConfigFromEnv` or
+`ConfigFromTOML`. Passing a literal `AsterConfig` does not mean that every
+Python configuration helper or identity workflow is available in Go.
+
+## Streaming handlers
+
+All patterns use the same service definition and Rust dispatcher:
+
+| Constructor | Handler inputs | Handler output |
+| --- | --- | --- |
+| `Unary` | `context.Context`, `*Request` | `*Response`, `error` |
+| `ServerStream` | Context, request, `send func(*Response) error` | `error` |
+| `ClientStream` | Context, `iter.Seq2[*Request, error]` | Response, error |
+| `BidiStream` | Context, request iterator, send function | Error |
+
+```go
+aster.ServerStream("greet", func(ctx context.Context, req *Request,
+    send func(*Response) error) error {
+    for i := 0; i < 3; i++ {
+        if err := ctx.Err(); err != nil { return err }
+        if err := send(&Response{Message: req.Name}); err != nil { return err }
+    }
+    return nil
+})
+```
+
+For client and bidi streams, check the error yielded with each request before
+using its value. Return send errors promptly. Sending can wait for native
+capacity; do not hold application-wide locks across it. The request iterator
+supports incremental delivery, so bidi handlers can respond before input ends.
+
+## Sessions and call context
+
+`NewSessionService(name, version, factory, methods...)` creates state per
+connection-scoped session ID. Its factory accepts `SessionInfo` and returns
+an application object. Retrieve it with `Session[T](ctx)`. An object that
+implements `io.Closer` is closed when its session ends.
+
+`CallInfoFromContext(ctx)` exposes the peer, method, metadata, and verified
+attributes. Use the context for cancellation and deadlines in downstream work.
+Shared handlers and distinct call streams can run concurrently; synchronize
+mutable application state, including state shared by calls in one session.
+
+## Admission and authorization
+
+The default server-owned gate is protected. `Config.AllowAllConsumers=true`
+selects open development mode. A ticket supplies addressing information; it
+does not itself admit a peer.
+
+The Go wrapper does not implement the high-level consumer credential handshake.
+For protected deployments, configure the gate and admit verified peer IDs
+through your application. `OnNonRPC` can receive admission-protocol connections
+for an application-supplied handler; that callback owns and must close them.
+Do not advertise a credential workflow just by enabling its ALPN.
+
+Use `Requires(RequireRole("operator"))` on a method, or `WithRequires` on a
+service. Populate `server.SetPeerAttributes` only from verified identity data.
+Rust checks capabilities before invoking Go; untrusted request metadata must
+not become trusted role attributes.
+
+## Errors, deadlines, and cleanup
+
+Return `*aster.RpcError` for an intentional RPC status. Context deadlines
+produce `DEADLINE_EXCEEDED`; unexpected errors and recovered panics produce
+`INTERNAL`. Avoid including secrets in messages returned to clients.
+
+Rust bounds a call by the caller deadline, method timeout, and server cap.
+Handlers must observe their context to stop application work promptly.
+Cancellation does not roll back an already committed mutation.
+
+`Close` stops dispatch and uses bounded waits for Go call goroutines. A handler
+that ignores cancellation can outlive `Close`; ensure application work observes
+its context and has explicit resource cleanup. Close resources created by your application;
+a caller-supplied gate remains caller-owned. `OnConnectionClosed` runs on the
+poll goroutine and must not block.
+
+## Node access and telemetry
+
+`server.Node()` gives access to the node's data APIs; `server.Health()` exposes
+an attached health listener. Reuse the server's node rather than creating a
+competing accept loop. Rust logs bridge to `log/slog`; use `SetLogger` to select
+the destination and initialize observability before startup for explicit settings.
+
+Continue with the [Go client](/docs/bindings/go/client/),
+[trust model](/docs/concepts/trust-model/), and [observability](/docs/guides/observability/).

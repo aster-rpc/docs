@@ -1,0 +1,170 @@
+---
+title: Rust server
+description: Build a Rust server with typed services, streaming handlers, session factories, admission, and lifecycle control.
+slug: docs/bindings/rust/server
+---
+
+A Rust server makes your application's service methods callable by other
+peers. You implement the application behavior; Aster receives calls, dispatches
+them to the registered service, and sends responses back to the caller.
+
+`aster::rpc::AsterServer` owns the node and the running RPC dispatcher. Use it
+when this server should manage the Aster runtime's lifetime. If your application
+already owns a node, use the [lower-level integration](#node-access-and-lower-level-integration)
+to attach RPC serving to that node.
+
+## Before you start
+
+Follow the [complete Rust tutorial](/docs/quickstart/rust/) to install the
+matching dependencies and make your first call. The snippets here extend its
+`Echo` service and assume its types and implementation are in scope. Enable
+the `rpc` Cargo feature. These snippets illustrate individual APIs; the
+tutorial supplies the complete runnable program.
+
+An application server has three responsibilities:
+
+- Register the service implementations callers may invoke.
+- Keep the runtime alive while those services are needed.
+- Apply an admission and authorization policy appropriate to the deployment.
+
+Start with one shared service. Add streaming when one call needs multiple
+messages, or sessions when a client needs its own service state across calls.
+The sections below explain those choices and their lifecycle requirements.
+
+## Define and register a service
+
+The `#[aster::service]` macro generates a server adapter and typed client from
+a trait. Payloads derive `ForyStruct` and `aster::AsterType` with explicit wire
+names. Implement the trait using `#[aster::rpc::async_trait]`.
+
+```rust
+let server = aster::rpc::AsterServer::builder()
+    .service(EchoServer::new(EchoImpl))
+    .handler_timeout(Some(std::time::Duration::from_secs(30)))
+    .start()
+    .await?;
+println!("{}", server.address()?);
+```
+
+Starting the builder creates the node and begins serving registered methods.
+The printed address is a ticket a client can use to connect; it does not grant
+permission to invoke protected methods. `run(self).await` consumes the server and
+keeps a standalone producer alive.
+For an application with its own lifetime, keep the server handle and call
+`shutdown().await` when the application stops.
+
+## Configuration and identity
+
+| Builder method | Purpose |
+| --- | --- |
+| `config(AsterConfig)` | Base node and runtime configuration |
+| `identity(path)` | Endpoint secret-key file containing 64 hexadecimal characters |
+| `persistent(directory)` | Persistent storage |
+| `relay(mode)` | Relay policy |
+| `discovery(enabled)` | Local discovery, when compiled in |
+| `hooks(enabled)` | Connection admission events, with the hooks feature |
+| `attributes(store)` | Verified peer attributes used for capabilities |
+| `handler_timeout(duration)` | Handler cap; `None` disables the cap |
+| `max_sessions_per_connection(limit)` | Bound session resource use |
+| `health(config)` | Operations listener with the health feature |
+
+The builder resolves its configuration before starting the node. Protect
+endpoint secret-key files as secrets; these are distinct from the credential
+TOML used by Python and JVM enrollment helpers. Public tickets contain peer
+identity and addressing
+hints, not the secret key or a grant of method authorization.
+
+## Streaming handlers
+
+Use a unary call for one request and one response. Streaming allows either
+side to send messages incrementally, such as results produced over time or a
+sequence of uploaded records. The service trait supports four shapes:
+
+| Pattern | Declaration |
+| --- | --- |
+| Unary | Request value → `aster::Result<Response>` |
+| Server stream | `#[rpc(server_stream)]`, request and `ResponseSink<Response>` |
+| Client stream | `#[rpc(client_stream)]`, `RequestStream<Request>` → response |
+| Bidirectional | `#[rpc(bidi_stream)]`, request stream and response sink |
+
+A server-stream method declaration, inside a service trait:
+
+```rust
+#[rpc(server_stream)]
+async fn greet(
+    &self,
+    request: Request,
+    responses: aster::rpc::ResponseSink<Response>,
+) -> aster::Result<()>;
+```
+
+In the implementation, await each sink send and propagate failures. Read
+request streams incrementally. Backpressure is part of the call; avoid holding
+shared locks across network awaits. Keep shared service state safe for
+concurrent calls.
+
+## Session-scoped services
+
+Use a session-scoped service when a client needs private state across several
+calls, such as a work area built up through successive operations. A shared
+service instead exposes the same service instance to callers.
+
+Register a service as session-scoped by supplying a factory with
+`register_session(|| SessionServer::new(SessionImpl::new()))`, using the
+adapter generated for that service. The factory creates fresh state for a
+connection-scoped session ID. Several sessions can share one peer connection;
+a session is not tied to one persistent QUIC stream.
+
+Rust enforces session limits and rejects invalid reuse. The factory and service
+must satisfy the generated `Send`/`Sync` bounds. Design session state for
+concurrent method calls and avoid using peer identity alone as a session key.
+See [session-scoped services](/docs/concepts/session-scoped-services/) for the
+shared protocol rules.
+
+## Admission and capabilities
+
+The minimal Rust tutorial is permissive. Rust's high-level server does not
+perform Python's credential enrollment/consumer-admission workflow. Enable
+admission hooks and implement the policy required by your deployment. Take the
+admission receiver with `take_admission()` and keep the handler running.
+Configure fail-closed behavior where a missing or failed policy must deny access;
+enabling hooks alone is not an authorization policy.
+
+`#[rpc(requires = require_role("operator"))]` adds a method requirement when
+`require_role` is imported from `aster::rpc`. Supply verified attributes through
+an `AttributeStore`; a caller's metadata is not trusted role evidence. The
+Rust dispatcher enforces requirements before entering the handler.
+
+HTTP has a separate authentication boundary. Use the [HTTP guide](/docs/guides/http/)
+for `with_http` and authentication rather than assuming an HTTP caller has an
+Iroh-authenticated peer identity.
+
+## Deadlines, errors, and shutdown
+
+The dispatcher enforces effective call deadlines from the caller, method, and
+handler cap. Propagate errors with `aster::Result` and do not return sensitive
+internal context to untrusted callers. A canceled or expired call does not
+undo completed application writes; use idempotency or durable recovery for
+operations that may be retried.
+
+`shutdown(self).await` consumes the server and shuts down its owned runtime
+resources. Stop dependent application work and release data subscriptions
+before shutting down. Avoid relying on process exit to flush telemetry or
+finish durable application work.
+
+## Node access and lower-level integration
+
+`id()` returns the node identity; `address()` returns a ticket. `node()`,
+`blobs()`, `docs()`, and `gossip()` expose the shared data stack when their
+features are enabled. `attributes()` and `dispatcher()` give access to the
+running RPC authorization and dispatch state.
+
+For an existing `Node`, build `aster::rpc::Server::new(&node)`, register service
+adapters, and call `serve()` to get a `ServerHandle`. That handle controls the
+serve task; the application remains responsible for the node. Do not run
+competing accept loops. Use `route_alpn` for explicit custom protocol routing.
+
+Enable `otel` or `health` for the shared observability pipeline. The
+[operations guide](/docs/guides/operations/) covers readiness and metrics.
+Continue with the [Rust client](/docs/bindings/rust/client/) and
+[trust model](/docs/concepts/trust-model/).

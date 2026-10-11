@@ -1,14 +1,30 @@
 ---
-title: Client
+title: TypeScript client
 slug: "docs/bindings/typescript/client"
+description: "Connect from TypeScript, choose typed or dynamic calls, and manage streams and connection ownership."
 ---
 
+`AsterClientWrapper` calls service methods hosted by another peer. It owns the
+transport connection, performs consumer admission, and discovers the services
+the producer offers. Keep it alive while calls and streams are in flight, then
+close it when those owners finish.
 
-# TypeScript client reference
+## Before you start
+
+Follow the [typed first-service project](/docs/quickstart/python/) for package
+setup, generated service metadata, and matching payload definitions. Connect
+to the producer's printed ticket, obtain a client with `client(ServiceClass)`,
+then invoke its methods with typed request values.
+
+The proxy fragment below demonstrates a separate dynamic workflow. Its
+interface assertion gives TypeScript application method names; runtime
+serialization still depends on the producer manifest and codec.
 
 ## AsterClientWrapper
 
-The primary way to connect to an Aster server over QUIC. Handles consumer admission, service discovery, and the proxy/typed-client surface.
+Use the wrapper for consumer admission and discovery over QUIC. A protected
+producer also requires a provisioned identity or enrollment credential. The
+placeholder ticket below must be replaced with the producer's address.
 
 ```typescript
 import { AsterClientWrapper } from '@aster-rpc/aster';
@@ -17,13 +33,16 @@ const client = new AsterClientWrapper({
   address: "aster1...",
 });
 await client.connect();
-
-// Dynamic proxy: synthesizes XLANG types from the contract
-const hello = await client.proxy("Hello");
-const reply = await hello.sayHello({ name: "World" });
-console.log(reply.message);
-
-await client.close();
+try {
+  // Dynamic proxy: synthesizes XLANG types from the contract
+  const hello = await client.proxy("Hello") as unknown as {
+    sayHello(request: { name: string }): Promise<{ message: string }>;
+  };
+  const reply = await hello.sayHello({ name: "World" });
+  console.log(reply.message);
+} finally {
+  await client.close();
+}
 ```
 
 ### Options
@@ -42,9 +61,8 @@ await client.close();
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `connect()` | `Promise<void>` | Run consumer admission against the producer and discover services |
-| `proxy(name)` | `ProxyClient` | Dynamic proxy using manifest-synthesized XLANG types. |
+| `proxy(name)` | `Promise<ProxyClient>` | Dynamic proxy using manifest-synthesized XLANG types. |
 | `client(ServiceClass)` | `Promise<typed client>` | Typed client built from a generated client class |
-| `session(name)` | `Promise<SessionProxyClient>` | Open a multiplexed session against a session-scoped service |
 | `close()` | `Promise<void>` | Close the underlying QUIC connections |
 
 ### Properties
@@ -79,6 +97,7 @@ function createClient<T extends new (...args: any[]) => any>(
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
+| `interceptors` | `Interceptor[]` | `[]` | Client policy hooks |
 | `timeout` | `number` | `undefined` | Default timeout in seconds for all calls |
 | `metadata` | `Record<string, string>` | `{}` | Default metadata for all calls |
 
@@ -89,19 +108,26 @@ Every method accepts an optional `CallOptions` as the last argument:
 ```typescript
 const result = await client.sayHello(req, {
   metadata: { 'x-request-id': '123' },
-  deadlineEpochMs: Date.now() + 30_000,
+  deadlineSecs: 30,
 });
 ```
 
 | Option | Type | Description |
 |--------|------|-------------|
 | `metadata` | `Record<string, string>` | Per-call metadata (merged with defaults) |
-| `deadlineEpochMs` | `number` | Absolute deadline as epoch milliseconds |
+| `deadlineSecs` | `number` | Relative RPC budget in seconds; fractions accepted |
 | `serializationMode` | `number` | Override serialization mode |
-| `contractId` | `string` | Contract identity for verification |
-| `callId` | `string` | Correlation ID (auto-generated if omitted) |
+| `signal` | `AbortSignal` | Cancel a live call |
+| `version` | `number` | Service version |
+| `sessionId` | `number` | Connection-scoped session ID |
+| `callId` | `number` | Correlation ID (auto-generated if omitted) |
 
 ## Streaming
+
+Use a server stream for ongoing updates, a client stream for batches produced
+incrementally, and bidi for interactive exchange. The following fragments
+assume matching `watchItems`, `uploadBatch`, and `Chat.chat` contracts and their
+payload types; the Hello project does not supply those methods.
 
 ### Server streaming
 
@@ -124,30 +150,67 @@ const result = await client.uploadBatch(async function*() {
 
 ### Bidirectional streaming
 
-```typescript
-const channel = client.chat();
-await channel.send(new Message({ text: "hello" }));
-await channel.send(new Message({ text: "world" }));
-await channel.close();
+The typed-client declaration does not accurately describe the bidi
+channel returned at runtime. Use an already configured transport with the
+matching service codec/schema for this pattern:
 
-for await (const reply of channel) {
-  console.log(reply);
+```typescript
+const channel = transport.bidiStream('Chat', 'chat', { deadlineSecs: 30 });
+const sending = (async () => {
+  await channel.send(new Message({ text: 'hello' }));
+  await channel.close();
+})();
+const receiving = (async () => {
+  for await (const reply of channel) console.log(reply);
+})();
+try {
+  await Promise.all([sending, receiving]);
+} finally {
+  try { await channel.cancel?.(); }
+  finally { await Promise.allSettled([sending, receiving]); }
 }
 ```
+
+`close()` half-closes request input; responses can continue. Receive concurrently
+with sending to avoid backpressure deadlocks. Cancel unfinished calls and close
+the client in a `finally` block.
+
+## Sessions, cancellation, and errors
+
+`AsterClientWrapper` has no `session()` method. Explicit sessions are
+available through `IrohTransport.openSession()` and the call option `sessionId`.
+Keep IDs on their originating connection. A session transport is a view of the
+parent connection: closing that view closes the connection and affects sibling
+sessions. Coordinate its ownership rather than closing each view independently. See the [session model](/docs/concepts/session-scoped-services/).
+
+Pass an `AbortController`'s `signal` in per-call options to cancel work. Set
+`deadlineSecs` for a native RPC budget; racing a call against a JavaScript timer
+only limits the local wait. Cancellation cannot undo a committed remote mutation.
+
+RPC status failures use the exported `RpcError` hierarchy. Inspect status/code
+rather than matching messages. Retry only idempotent application operations;
+streaming calls must handle terminal errors after partial delivery.
 
 ## Transport implementations
 
 | Transport | Use case | Package |
 |-----------|----------|---------|
 | `LocalTransport` | Testing (in-process, no network) | `@aster-rpc/aster` |
-| `IrohTransport` | Production (QUIC over Iroh P2P) | `@aster-rpc/aster` |
+| `IrohTransport` | Remote peers (QUIC over Iroh P2P) | `@aster-rpc/aster` |
 
 ```typescript
 // Local (testing)
 import { LocalTransport, ServiceRegistry } from '@aster-rpc/aster';
 const transport = new LocalTransport(registry);
 
-// Remote (production) — requires NAPI native addon
+// Remote peers — requires NAPI native addon
 import { IrohTransport } from '@aster-rpc/aster';
 const transport = new IrohTransport(connection, codec);
 ```
+
+## Next steps
+
+- [TypeScript server](/docs/bindings/typescript/server/)
+- [Trust model](/docs/concepts/trust-model/)
+- [Tested TypeScript quickstart](/docs/quickstart/python/)
+- [TypeScript build setup](/docs/guides/typescript-build-setup/)

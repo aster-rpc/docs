@@ -1,28 +1,48 @@
 ---
 title: CLI reference
 slug: "docs/reference/cli"
+description: "Inspect contracts, sign credentials, call peers, and understand separate CLI and registry prerequisites."
 ---
 
 
-The `aster` command-line tool provides utilities for managing profiles, enrolling nodes, generating contracts, invoking services, and exploring remote peers interactively. Servers are started from Python code using `AsterServer`; the CLI provides the client-side tools for connecting, testing, and generating typed client libraries.
+The `aster` CLI supports contract inspection, credential signing, and calls to
+running services. Use it when you need to check an interface or exercise a peer
+without writing a client application. Servers run through the SDK in the
+language you choose.
 
-:::note[Preview validation]
-These commands describe the current CLI source. The walkthrough has not been validated word for word on a clean host for 0.3.893. PyPI may provide an older CLI version.
-:::
+| Task | Requires a remote peer? | Starting command |
+| --- | --- | --- |
+| Record a Python service's interface | No; service module must be importable | `aster contract gen` |
+| Create an operator root or sign credentials | No; trusted signing key required | `aster trust` or `aster enroll node` |
+| Inspect and call a service | Yes; address and any required credentials | `aster shell` or `aster call` |
+| Publish or request access through `@aster` | Yes; configured registry service and identity | `aster publish` or `aster access` |
 
-## Installation
+## Installation and qualification
 
-The CLI ships as a separate package, `aster-cli`, which depends on `aster-rpc`:
+The CLI is distributed separately as `aster-cli`; its dependency declaration
+allows a range of `aster-rpc` versions. Installing it does not establish that
+its commands match your SDK. A matching public CLI package and a clean-host
+walkthrough are not qualified by these docs. Check the installed parser before
+using the command examples:
 
 ```bash
-pip install aster-cli
+python -m pip show aster-cli aster-rpc
+aster --help
+aster trust sign --help
 ```
 
-This installs both the framework and the `aster` command-line tool. Or install from a source checkout:
+The package installation command is:
 
 ```bash
-pip install -e cli/
+python -m pip install aster-cli
 ```
+
+Run it in a separate environment when evaluating package compatibility. Confirm
+the resolved SDK and native package against your [language installation](/docs/bindings/python/).
+For maintainers with a matching source checkout, `python -m pip install -e cli/`
+installs that checkout's CLI; the checkout and its dependencies must be selected
+together. The reference below describes inspected command behavior and does not
+establish the availability of a hosted registry service.
 
 ## Commands
 
@@ -41,7 +61,7 @@ aster contract gen --service my_module:MyServiceClass --out .aster/manifest.json
 | `--service MODULE:CLASS` | Python import path to the `@service`-decorated class. May be specified multiple times. |
 | `--out PATH` | Output path for the manifest JSON file. Default: `.aster/manifest.json`. |
 
-The manifest is checked at `AsterServer` startup. If a service's live `contract_id` does not match the committed manifest, the server refuses to start. This prevents accidental wire-breaking changes.
+Python `AsterServer` checks `.aster/manifest.json` in its working directory when the file exists. A listed service whose live `contract_id` differs prevents startup. Services absent from the manifest are skipped, so include every interface you intend to guard. Review contract changes and application behavior together.
 
 **Example workflow:**
 
@@ -61,47 +81,40 @@ python producer.py  # fails if interface changed without updating manifest
 Generate cryptographic keys for the Aster trust model.
 
 ```bash
-# Generate a root keypair (operator's offline machine)
-aster trust keygen root --out root.key
-
-# Extract the public key from a root keypair
-aster trust keygen pubkey --in root.key --out root_pub.key
+# On the operator's signing machine; also writes root.pub
+aster trust keygen --out-key root.key
 ```
 
-The root keypair file is JSON containing `private_key` and `public_key` as hex strings. The public key file contains just the hex-encoded 32-byte public key.
+The root keypair file contains `private_key` and `public_key` as hex strings.
+The companion public-key file contains the hex-encoded public key. Provision
+the public key independently to nodes; keep the private key on the signing
+machine. See the [trust model](/docs/concepts/trust-model/).
 
 ### `aster trust sign`
 
-Sign enrollment credentials for consumers or producers.
+Sign a consumer policy credential using the operator's root:
 
 ```bash
-# Sign a consumer enrollment credential
-aster trust sign consumer \
+aster trust sign \
   --root-key root.key \
   --type policy \
-  --expires 30d \
-  --out consumer.token
-
-# Sign with specific attributes
-aster trust sign consumer \
-  --root-key root.key \
-  --type policy \
-  --attr team=billing \
-  --attr tier=premium \
-  --expires 90d \
+  --attributes '{"aster.role":"operator"}' \
   --out consumer.token
 ```
 
-**Arguments:**
-
 | Argument | Description |
-|----------|-------------|
-| `--root-key PATH` | Path to the root keypair file. |
-| `--type TYPE` | Credential type: `policy` (long-lived) or `ott` (one-time token). |
-| `--expires DURATION` | Expiry: relative (`30d`, `24h`) or absolute ISO 8601 (`2025-12-31T23:59:59`). Default: 30 days. |
-| `--attr KEY=VALUE` | Attribute key-value pair. May be specified multiple times. |
-| `--endpoint-id HEX` | Bind the credential to a specific endpoint ID. |
-| `--out PATH` | Output path for the signed credential JSON. |
+| --- | --- |
+| `--root-key PATH` | Root keypair JSON file |
+| `--type TYPE` | `producer`, `policy`, or `ott`; defaults to `producer`, so choose explicitly |
+| `--attributes JSON` | Attribute object; method permissions must match the declared requirements |
+| `--endpoint-id HEX` | Bind to an endpoint; required for producer credentials |
+| `--expires ISO8601` | Absolute expiry; omission defaults to 30 days |
+| `--out PATH` | Credential JSON destination |
+
+`ott` creates a one-time token. Enforcing one-time use requires the server's
+replay policy and nonce storage. A signed credential alone does not install
+admission enforcement. Prefer `aster enroll node` when you need an identity
+file pairing an endpoint key with its credential.
 
 ### `aster enroll node`
 
@@ -132,7 +145,14 @@ aster enroll node \
 | `--identity PATH` | Path to the `.aster-identity` file. Default: `.aster-identity` in current directory. |
 | `--expires DURATION` | Credential expiry. Default: 30 days. |
 
-The command reads the root private key from the OS keyring (stored by `aster profile create`), generates or reuses the node's secret key, computes the `EndpointId`, signs a credential, and appends a `[[peers]]` entry to the identity file.
+The command resolves the signing key from the profile/keyring or a `--root-key` file, generates or reuses the node's secret key, computes the `EndpointId`, signs a credential, and appends a `[[peers]]` entry to the identity file.
+
+`--capabilities` sets the credential's `aster.role` value. Optional
+`--attributes` takes comma-separated `key=value` pairs here; `trust sign` uses
+JSON instead. `--expires` accepts `30d`, `24h`, or an absolute ISO timestamp.
+Protect the output file because it contains the endpoint secret as well as the
+credential. Producer identity entries do not enable Python producer mesh
+admission; that protocol is unavailable in the Python runtime.
 
 ### `aster profile`
 
@@ -155,15 +175,6 @@ aster profile show prod
 aster profile delete staging
 ```
 
-### `aster config show`
-
-Display the resolved configuration with provenance tracking. Equivalent to calling `AsterConfig.from_env().print_config()`.
-
-```bash
-aster config show
-aster config show --json
-```
-
 ### `aster call`
 
 Invoke a unary RPC method on a remote service from the command line. One-shot, non-interactive.
@@ -180,7 +191,7 @@ aster call aster1Qm... MissionControl.getStatus '{"agent_id": "edge-node-7"}'
 
 Accepts JSON input and uses the discovered contract to encode an XLANG payload. Local type definitions are not required.
 
-The current CLI can open a session for a one-shot call to a session-scoped service. A one-shot command does not preserve that session across separate invocations. Use an SDK session when several calls must share state.
+The CLI can open a session for a one-shot call to a session-scoped service. A one-shot command does not preserve that session across separate invocations. Use an SDK session when several calls must share state.
 
 ### `aster shell`
 
@@ -237,6 +248,17 @@ Verify an exported `.aster.json` matches the local manifest.
 aster contract verify ./TaskManager.aster.json
 ```
 
+## Registry service commands
+
+The following commands call a running `@aster` service. They require its
+address, compatible service contracts, and the operator or consumer identity
+needed for the operation. They do not start a registry. These docs do not
+qualify a public hosted service or its email delivery.
+
+Supply `--aster ADDRESS`, set `ASTER_SERVICE_ADDR`, or configure
+`[aster_service].node_id` in the CLI profile file. Direct-address `call` and
+`shell` do not require this hosted-service workflow.
+
 ### `aster join`
 
 Claim a handle on the `@aster` registry.
@@ -250,7 +272,7 @@ aster join --handle myname --email me@example.com
 Complete email verification for a claimed handle.
 
 ```bash
-aster verify --code 123456
+aster verify 123456
 ```
 
 ### `aster publish`
@@ -271,17 +293,20 @@ aster discover task
 
 ### `aster access`
 
-Manage access control for published services.
+Manage registry access records for published services. This does not establish
+that the target producer implements delegated admission. Python producers do
+not accept `@aster` enrollment tokens; use their direct consumer-credential
+workflow for RPC access.
 
 ```bash
-aster access grant @alice --service TaskManager --role reader
-aster access revoke @alice --service TaskManager
-aster access list --service TaskManager
+aster access grant TaskManager @alice --role reader --aster "$ASTER_SERVICE_ADDR"
+aster access revoke TaskManager @alice --aster "$ASTER_SERVICE_ADDR"
+aster access list TaskManager --aster "$ASTER_SERVICE_ADDR"
 ```
 
-### `aster mcp`
+## `aster mcp`
 
-Start an MCP (Model Context Protocol) server that exposes Aster services as tools for AI agents.
+Start an [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) server that exposes Aster services as tools for AI agents.
 
 ```bash
 aster mcp <ADDRESS>

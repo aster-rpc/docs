@@ -1,0 +1,109 @@
+---
+title: Kotlin applications
+description: Host and call JVM services from Kotlin, with explicit generation and coroutine ownership boundaries.
+slug: docs/bindings/java/kotlin
+---
+
+Kotlin uses the same JVM server, client, codec, and native owners as Java.
+The [JVM project](/docs/quickstart/java/) includes a tested Kotlin entry point
+using the shared Java payload and service definitions. This avoids generating
+a second contract for the same service.
+
+After building that project, run:
+
+```sh
+java --enable-native-access=ALL-UNNAMED -cp "target/classes:$(cat classpath.txt)" hello.KotlinMainKt
+```
+
+It prints `Hello, Kotlin!`. Verified with JDK 25.0.2, Kotlin 2.4.0-Beta1, and
+the published Aster packages on Apple Silicon macOS on 11 October 2026.
+See [compatibility](/docs/reference/compatibility/) for package qualification.
+
+## Host and call a shared JVM contract
+
+```kotlin
+package hello
+
+import java.time.Duration
+import java.util.concurrent.TimeUnit
+import site.aster.client.AsterClient
+import site.aster.client.CallOptions
+import site.aster.codec.ForyCodec
+import site.aster.codec.ForyTags
+import site.aster.config.AsterConfig
+import site.aster.server.AsterServer
+
+fun main() {
+    val config = AsterConfig.builder().relayMode("disabled")
+        .bindAddr("127.0.0.1:0").allowAllConsumers(true).build()
+    val codec = ForyCodec()
+    ForyTags.register(codec.fory(), Echo.Request::class.java, "hello/Request")
+    ForyTags.register(codec.fory(), Echo.Response::class.java, "hello/Response")
+    AsterServer.builder().config(config).codec(codec).service(Echo(), EchoDispatcher())
+        .build().get(15, TimeUnit.SECONDS).use { server ->
+        AsterClient.builder().config(config).codec(codec).consumerAdmission(false)
+            .build().get(15, TimeUnit.SECONDS).use { client ->
+            val reply = client.call(server.node().nodeAddr(), "Echo", "hello",
+                Echo.Request("Kotlin"), Echo.Response::class.java,
+                CallOptions.DEFAULT.withTimeout(Duration.ofSeconds(5))).get()
+            println(reply.message())
+        }
+    }
+}
+```
+
+`use` keeps the client and server alive until the call finishes, then closes
+them in reverse order. The sample uses blocking `get()` on the main thread.
+Do not block a coroutine dispatcher intended for nonblocking application work.
+
+## Choose a service definition path
+
+| Path | Build requirement | What this guide demonstrates |
+| --- | --- | --- |
+| Call or host the existing Java Echo contract | Build the JVM project and its Java APT output | The executable Kotlin entry point above |
+| Declare a service in Kotlin | Configure the matching KSP processor and retain its output | Processor responsibilities and limitations below |
+
+Reusing the Java contract is the shortest evaluation path. A Kotlin-declared
+service needs a separate compiler setup; the command above does not qualify
+that setup or generate a Kotlin service.
+
+## Services declared in Kotlin
+
+For annotated Kotlin services, use the matching `site.aster:aster-codegen-ksp`
+processor and keep its generated Java sources and service-provider resources
+in the build. Java APT does not process Kotlin source. The KSP version must
+match the Kotlin compiler/toolchain selected by that project; copying only a
+Maven runtime dependency does not configure KSP.
+
+The released processor generates unary dispatch. Its streaming emitter uses
+the same unimplemented stubs as Java APT. For server, client, and
+bidi streams, supply a `ServiceDispatcher` with the appropriate streaming SPI
+implementation, as demonstrated in the JVM tutorial. Kotlin `Flow` and
+`suspend` declarations are not automatically adapted into that SPI.
+
+## Futures, streams, and sessions
+
+The client returns Java `CompletableFuture` values. If your application uses
+`kotlinx-coroutines-jdk8` future adapters, ensure cancellation reaches the
+invocation future. A local coroutine timeout alone must not leave a stream
+owner alive. Use the RPC `CallOptions.withTimeout` to send the call budget.
+
+Incremental `ServerStreamCall` and `BidiCall` owners expose blocking receive
+methods. Run those operations on appropriate application threads, consume
+responses concurrently with input where needed, and close the owners in
+`finally` or `use` scopes. `BidiCall.complete()` ends input without ending
+response delivery.
+
+Session calls use `ClientSession`, with the same connection-scoped IDs as Java.
+Its `close()` is a no-op; remote session state is reclaimed when the
+connection closes. Do not treat Kotlin `use` as an independent remote session
+release mechanism.
+
+## Trust and telemetry
+
+Use the JVM admission and verified-attribute APIs. Kotlin properties or caller
+metadata must not substitute for authenticated peer roles. Rust metrics and
+traces and the SLF4J log bridge are shared with Java.
+
+Continue with the [JVM server reference](/docs/bindings/java/server/) and
+[JVM client reference](/docs/bindings/java/client/) for all options and patterns.
